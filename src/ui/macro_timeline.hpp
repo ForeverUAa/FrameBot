@@ -45,6 +45,11 @@ public:
     // Event manipulation
     void deleteEvent(int eventIndex);
     void deleteSelectedEvents();
+    void setSelectedEventFrame(int frame);
+    void setSelectedEventSubframe(double subframe);
+    void setSelectedEventButton(int button);
+    void setSelectedEventPlayer(bool player2);
+    void setSelectedEventAction(bool pressed);
     void insertEvent(int position, const input& event);
     void moveEvent(int fromIdx, int toIdx);
     void duplicateEvent(int eventIndex);
