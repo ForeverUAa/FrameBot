@@ -1,0 +1,53 @@
+name: Build Windows Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing GitHub release tag to upload the build to"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+      - name: Build Geode mod
+        uses: geode-sdk/build-geode-mod@main
+        id: build
+        with:
+          target: Win64
+          build-config: Release
+          bindings: geode-sdk/bindings
+          bindings-ref: main
+          export-pdb: false
+
+      - name: Upload .geode to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+        run: |
+          $files = Get-ChildItem -Path $env:BUILD_OUTPUT -Filter "*.geode" -File
+
+          if ($files.Count -eq 0) {
+            throw "No .geode package was produced."
+          }
+
+          foreach ($file in $files) {
+            Write-Host "Uploading $($file.FullName) to release $env:RELEASE_TAG"
+            gh release upload $env:RELEASE_TAG $file.FullName --clobber
+          }
