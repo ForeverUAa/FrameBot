@@ -1,5 +1,8 @@
 name: Build Geode Mod
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -53,3 +56,26 @@ jobs:
         with:
           name: Build Output
           path: ${{ steps.build.outputs.build-output }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=("${{ steps.build.outputs.build-output }}"/*.geode)
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No .geode package was produced."
+            exit 1
+          fi
+
+          tag="build-${RUN_NUMBER}"
+          gh release create "$tag" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "FrameBot build ${RUN_NUMBER}" \
+            --notes "Automated FrameBot build ${RUN_NUMBER} from commit ${GITHUB_SHA}."
