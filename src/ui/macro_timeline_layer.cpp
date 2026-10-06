@@ -262,14 +262,16 @@ void MacroTimelineLayer::renderEvents() {
         int y = evt.player2 ? p2Y : p1Y;
         ccColor3B color = getActionColor(evt.down);
 
-        // Draw event as small rectangle
+        // Keep the marker slightly wider than the visual frame so both presses
+        // and releases remain easy to select, especially in CBF mode.
+        const bool selected = timeline->isEventSelected(i);
         CCScale9Sprite* eventBox = CCScale9Sprite::create("GJ_square_02_001.png");
         eventBox->setScale(1.0f);
-        eventBox->setContentSize({6, renderState.eventHeight});
+        eventBox->setContentSize({8, renderState.eventHeight});
         eventBox->setPosition({x, y});
         eventBox->setColor(color);
-        eventBox->setOpacity(timeline->isEventSelected(i) ? 255 : 180);
-        eventBox->setZOrder(timeline->isEventSelected(i) ? 20 : 10);
+        eventBox->setOpacity(selected ? 255 : 180);
+        eventBox->setZOrder(selected ? 20 : 10);
         eventsLayer->addChild(eventBox);
 
         // Add button label (abbreviated)
@@ -280,6 +282,7 @@ void MacroTimelineLayer::renderEvents() {
         btnLabel->setScale(0.25f);
         btnLabel->setPosition({x, y});
         btnLabel->setColor({255, 255, 255});
+        btnLabel->setZOrder(selected ? 21 : 11);
         eventsLayer->addChild(btnLabel);
     }
 }
@@ -409,23 +412,24 @@ void MacroTimelineLayer::onZoomOutPressed(CCObject*) {
 bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent*) {
     if (!timeline) return false;
 
-    CCPoint pos = this->convertToNodeSpace(touch->getLocation());
-    int eventIdx = hitTestEvent(pos);
+    const CCPoint layerPos = this->convertToNodeSpace(touch->getLocation());
+    const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
+    int eventIdx = hitTestEvent(eventPos);
     if (eventIdx >= 0) {
         timeline->selectEvent(eventIdx);
         inputState.isDragging = true;
         inputState.draggedEventIdx = eventIdx;
-        inputState.dragStartX = pos.x;
+        inputState.dragStartX = eventPos.x;
         inputState.dragStartPreciseFrame = timeline->getEvent(eventIdx)->getPreciseFrame();
         return true;
     }
 
     // Clicking the timeline ruler moves the playhead.
     const float timelineTop = this->getContentSize().height - 60.0f;
-    if (pos.x >= 10.0f && pos.x <= 810.0f &&
-        pos.y >= timelineTop - renderState.timelineSize.height &&
-        pos.y <= timelineTop) {
-        float localX = pos.x - 10.0f;
+    if (layerPos.x >= 10.0f && layerPos.x <= 10.0f + renderState.timelineSize.width &&
+        layerPos.y >= timelineTop - renderState.timelineSize.height &&
+        layerPos.y <= timelineTop) {
+        float localX = layerPos.x - 10.0f;
         timeline->setPlayheadPrecise(
             (localX + timeline->getScrollOffset()) / renderState.pixelsPerFrame
         );
@@ -438,9 +442,8 @@ bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent*) {
 void MacroTimelineLayer::onTouchMoved(CCTouch* touch, CCEvent*) {
     if (!inputState.isDragging || inputState.draggedEventIdx < 0) return;
 
-    CCPoint pos = this->convertToNodeSpace(touch->getLocation());
-    float localX = pos.x - 10.0f;
-    double precise = (localX + timeline->getScrollOffset()) / renderState.pixelsPerFrame;
+    const CCPoint pos = eventsLayer->convertToNodeSpace(touch->getLocation());
+    double precise = (pos.x + timeline->getScrollOffset()) / renderState.pixelsPerFrame;
 
     if (precise < 0.0) precise = 0.0;
     timeline->setEventFrame(inputState.draggedEventIdx, static_cast<int>(precise));
