@@ -44,6 +44,8 @@ private:
     // UI Elements
     CCLabelBMFont* frameCounterLabel = nullptr;
     CCLabelBMFont* subframeLabel = nullptr;
+    CCLabelBMFont* inspectorLabels[8] = {};
+    CCMenu* inspectorMenu = nullptr;
     CCLabelBMFont* timeLabel = nullptr;
     CCScale9Sprite* selectedEventBg = nullptr;
     CCScale9Sprite* inspectorBg = nullptr;
@@ -74,6 +76,7 @@ private:
         bool isDragging = false;
         int draggedEventIdx = -1;
         float dragStartX = 0.0f;
+        double dragStartPreciseFrame = 0.0;
     } inputState;
 
     // Initialize UI sections
@@ -98,6 +101,14 @@ private:
     void onZoomInPressed(CCObject*);
     void onZoomOutPressed(CCObject*);
 
+    void onFrameDown(CCObject*);
+    void onFrameUp(CCObject*);
+    void onSubframeDown(CCObject*);
+    void onSubframeUp(CCObject*);
+    void onButtonCycle(CCObject*);
+    void onPlayerToggle(CCObject*);
+    void onActionToggle(CCObject*);
+
     // Helper functions
     std::string getButtonName(int button) const;
     ccColor3B getPlayerColor(bool player2) const;
@@ -115,6 +126,17 @@ private:
     void updateFrameCounter();
     void updateSubframeCounter();
     void updateInspectorPanel();
+    void adjustSelectedFrame(int delta);
+    void adjustSelectedSubframe(double delta);
+    void cycleSelectedButton();
+    void toggleSelectedPlayer();
+    void toggleSelectedAction();
+
+    int hitTestEvent(const CCPoint& pos);
+    CCPoint getEventRenderPos(int eventIndex);
+    CCRect getEventRenderRect(int eventIndex);
+    float frameToPixels(int frame, double subframe = 0.0) const;
+    int pixelsToFrame(float pixels) const;
 
     // Schedule updates
     void scheduleUpdate();
