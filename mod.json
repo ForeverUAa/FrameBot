@@ -114,6 +114,12 @@
 				"Frame Fixes"
 			]
 		},
+		"cbf": {
+			"type": "bool",
+			"name": "CBF",
+			"description": "Enables Click Between Frames playback for subframe inputs.",
+			"default": true
+		},
 		"frame_offset": {
 			"name": "Frame Offset",
 			"description": "Adds a frame offset when recording or playing macros",

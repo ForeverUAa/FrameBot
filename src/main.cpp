@@ -231,8 +231,12 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
     }
 
-    if (g.state == state::playing)
+    bool cbfEnabled = g.mod->getSettingValue<bool>("cbf");
+
+    if (g.state == state::playing && cbfEnabled)
       cbf::Engine::get()->prepare(Global::getCurrentFrame(), g.macro, g.currentAction);
+    else
+      cbf::Engine::get()->reset();
 
     GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 
@@ -326,7 +330,7 @@ class $modify(BGLHook, GJBaseGameLayer) {
     while (g.currentAction < g.macro.inputs.size() && frame >= g.macro.inputs[g.currentAction].frame) {
       auto input = g.macro.inputs[g.currentAction];
 
-      if (cbf::Engine::get()->consumeFired(g.currentAction)) {
+      if (cbfEnabled && cbf::Engine::get()->consumeFired(g.currentAction)) {
         g.currentAction++;
         g.safeMode = true;
         continue;
