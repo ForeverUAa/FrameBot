@@ -710,7 +710,7 @@ void MacroCell::handleLoad() {
 
     g.macro.xdBotMacro = g.macro.botInfo.name == "xdBot";
 
-	loadLayer->keyBackClicked();
+	if (auto popup = typeinfo_cast<framebot::Popup<>*>(loadLayer)) popup->closePopup();
 
 	RecordLayer* newLayer = nullptr;
 
