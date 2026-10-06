@@ -348,6 +348,7 @@ namespace {
             m_backupCurrentFrameFix = Global::get().currentFrameFix;
             m_backupRestart = Global::get().restart;
             m_backupFirstAttempt = Global::get().firstAttempt;
+            m_backupRespawnFrame = Global::get().respawnFrame;
             m_taskIndex = taskIndex;
             m_testingAll = all;
             m_testing = true;
@@ -414,8 +415,23 @@ namespace {
 
                 if (m_testingAll && m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
                     ++m_taskIndex;
-                    s_tasks[m_taskIndex].results.clear();
-                    buildCandidates(s_tasks[m_taskIndex]);
+
+                    auto& nextTask = s_tasks[m_taskIndex];
+                    nextTask.results.clear();
+                    nextTask.kind = FrameWindowKind::Normal;
+                    nextTask.windowCount = 0;
+                    nextTask.windowLow = 0;
+                    nextTask.windowHigh = 0;
+                    nextTask.cbfOnly = false;
+                    nextTask.recoveryMode = false;
+
+                    m_probeStage = ProbeStage::Primary;
+                    m_alternatingRuns.clear();
+                    m_pairRuns.clear();
+                    m_alternatingOffsets.clear();
+                    m_recoveryProbe = false;
+
+                    buildCandidates(nextTask);
                     m_candidateIndex = 0;
                     beginCandidate();
                     return;
@@ -543,6 +559,7 @@ namespace {
             m_targetFrame = candidate.frame;
             m_targetSubframe = candidate.subframe;
             m_targetSeen = false;
+            m_targetPosition = {0, 0};
             m_attemptStartFrame = 0;
 
             pl->resetLevelFromStart();
@@ -909,6 +926,7 @@ namespace {
             g.currentFrameFix = m_backupCurrentFrameFix;
             g.restart = m_backupRestart;
             g.firstAttempt = m_backupFirstAttempt;
+            g.respawnFrame = m_backupRespawnFrame;
 
             m_testing = false;
 
@@ -968,6 +986,7 @@ namespace {
         size_t m_backupCurrentFrameFix = 0;
         bool m_backupRestart = false;
         bool m_backupFirstAttempt = false;
+        int m_backupRespawnFrame = -1;
 
         enum class ProbeStage {
             Primary,
