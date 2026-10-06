@@ -115,8 +115,6 @@ class $modify(PlayLayer) {
 
     if (!PlayLayer::init(level, b1, b2)) return false;
 
-    Global::updateKeybinds();
-
     auto now = std::chrono::system_clock::now();
     g.currentSession = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     g.lastAutoSaveFrame = 0;
