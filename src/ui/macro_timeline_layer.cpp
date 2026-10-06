@@ -5,6 +5,16 @@
 
 
 namespace {
+    enum class FrameWindowKind {
+        Normal,
+        Shared,
+        Optimal,
+        Recovery,
+        Alternating,
+        Disconnected,
+        Impossible
+    };
+
     struct FrameTaskResult {
         int frame = 0;
         double subframe = 0.0;
@@ -19,6 +29,12 @@ namespace {
         bool player2 = false;
         bool down = true;
         std::vector<FrameTaskResult> results;
+        FrameWindowKind kind = FrameWindowKind::Normal;
+        int windowCount = 0;
+        int windowLow = 0;
+        int windowHigh = 0;
+        bool cbfOnly = false;
+        bool recoveryMode = false;
         bool finished = false;
     };
 
@@ -121,9 +137,19 @@ namespace {
                 for (const auto& result : task.results)
                     successful += result.passed ? 1 : 0;
 
-                std::string resultText = task.finished
-                    ? fmt::format("  {} window{}", successful, successful == 1 ? "" : "s")
-                    : "";
+                std::string resultText;
+                if (task.finished) {
+                    if (task.kind == FrameWindowKind::Impossible)
+                        resultText = task.cbfOnly ? "  [X] CBF" : "  [X]";
+                    else if (task.kind == FrameWindowKind::Disconnected)
+                        resultText = fmt::format("  [A-] {} valid", successful);
+                    else
+                        resultText = fmt::format(
+                            "  [{}] {}f",
+                            formatWindowKind(task.kind),
+                            task.windowCount
+                        );
+                }
 
                 auto text = CCLabelBMFont::create(
                     fmt::format("{}: {}{}", i + 1, formatTime(task.frame, task.subframe), resultText).c_str(),
@@ -148,43 +174,38 @@ namespace {
             if (std::abs(subframe) < 0.0001)
                 return std::to_string(frame);
 
-            return fmt::format("{}.{:02d}", frame, static_cast<int>(std::round(subframe * 100.0)));
+            return fmt::format(
+                "{}.{:02d}",
+                frame,
+                static_cast<int>(std::round(subframe * 100.0))
+            );
         }
 
-        void buildCandidates(const FrameTask& task) {
-            m_candidates.clear();
-
-            // Probe a symmetric frame window first.
-            for (int offset = -8; offset <= 8; ++offset)
-                m_candidates.push_back({std::max(0, task.frame + offset), 0.0});
-
-            // If the task itself contains subframe timing, probe between-frame
-            // positions as well. This intentionally adds more tests rather
-            // than collapsing them to the nearest whole frame.
-            if (task.subframe > 0.0001) {
-                for (int offset = -2; offset <= 2; ++offset) {
-                    for (int step = 1; step < 10; ++step)
-                        m_candidates.push_back({
-                            std::max(0, task.frame + offset),
-                            step / 10.0
-                        });
-                }
+        static const char* formatWindowKind(FrameWindowKind kind) {
+            switch (kind) {
+                case FrameWindowKind::Shared: return "A+";
+                case FrameWindowKind::Optimal: return "A~";
+                case FrameWindowKind::Recovery: return "A^";
+                case FrameWindowKind::Alternating: return "A/B";
+                case FrameWindowKind::Disconnected: return "A-";
+                case FrameWindowKind::Impossible: return "X";
+                default: return "A";
             }
         }
 
-        int findTaskEvent(const Macro& macro, const FrameTask& task) const {
+        int findEventNear(const Macro& macro, const input& original, double precise) const {
             int best = -1;
             double bestDistance = std::numeric_limits<double>::max();
 
             for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
                 const auto& event = macro.inputs[i];
-                if (event.button != task.button ||
-                    event.player2 != task.player2 ||
-                    event.down != task.down)
+
+                if (event.button != original.button ||
+                    event.player2 != original.player2 ||
+                    event.down != original.down)
                     continue;
 
-                double distance = std::abs(event.getPreciseFrame() -
-                    (task.frame + task.subframe));
+                double distance = std::abs(event.getPreciseFrame() - precise);
                 if (distance < bestDistance) {
                     bestDistance = distance;
                     best = i;
@@ -192,6 +213,125 @@ namespace {
             }
 
             return best;
+        }
+
+        int findAdjacentEvent(const Macro& macro, int eventIndex, bool previous) const {
+            if (eventIndex < 0 || eventIndex >= static_cast<int>(macro.inputs.size()))
+                return -1;
+
+            const auto& target = macro.inputs[eventIndex];
+            int best = -1;
+
+            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
+                if (i == eventIndex)
+                    continue;
+
+                const auto& event = macro.inputs[i];
+                if (event.player2 != target.player2 || event.button > 3)
+                    continue;
+
+                if (previous) {
+                    if (event.getPreciseFrame() >= target.getPreciseFrame())
+                        continue;
+                    if (best < 0 || event.getPreciseFrame() > macro.inputs[best].getPreciseFrame())
+                        best = i;
+                } else {
+                    if (event.getPreciseFrame() <= target.getPreciseFrame())
+                        continue;
+                    if (best < 0 || event.getPreciseFrame() < macro.inputs[best].getPreciseFrame())
+                        best = i;
+                }
+            }
+
+            return best;
+        }
+
+        int findNextSamePlayer(
+            const Macro& macro,
+            bool player2,
+            double after
+        ) const {
+            int best = -1;
+
+            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
+                const auto& event = macro.inputs[i];
+
+                if (event.player2 != player2 ||
+                    event.button > 3 ||
+                    event.getPreciseFrame() <= after)
+                    continue;
+
+                if (best < 0 ||
+                    event.getPreciseFrame() < macro.inputs[best].getPreciseFrame())
+                    best = i;
+            }
+
+            return best;
+        }
+
+        std::vector<int> validOffsets(const FrameTask& task) const {
+            std::vector<int> offsets;
+
+            for (const auto& result : task.results) {
+                if (result.passed && std::abs(result.subframe) < 0.0001)
+                    offsets.push_back(result.frame - task.frame);
+            }
+
+            std::sort(offsets.begin(), offsets.end());
+            offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+            return offsets;
+        }
+
+        static std::vector<int> sampleOffsets(
+            const std::vector<int>& values,
+            size_t count
+        ) {
+            if (values.size() <= count)
+                return values;
+
+            std::vector<int> result;
+            result.reserve(count);
+
+            for (size_t i = 0; i < count; ++i) {
+                const size_t index =
+                    i * (values.size() - 1) / std::max<size_t>(1, count - 1);
+                result.push_back(values[index]);
+            }
+
+            return result;
+        }
+
+        void buildCandidates(const FrameTask& task) {
+            m_candidates.clear();
+
+            for (int offset = -8; offset <= 8; ++offset) {
+                m_candidates.push_back({
+                    std::max(0, task.frame + offset),
+                    0.0,
+                    0,
+                    0,
+                    0.0,
+                    false,
+                    false
+                });
+            }
+
+            if (task.subframe > 0.0001 ||
+                (m_timeline && m_timeline->isCBFModeEnabled())) {
+                for (int offset = -2; offset <= 2; ++offset) {
+                    for (int step = 1; step < 10; ++step) {
+                        m_candidates.push_back({
+                            std::max(0, task.frame + offset),
+                            step / 10.0,
+                            0,
+                            0,
+                            0.0,
+                            false,
+                            false
+                        });
+                    }
+                }
+            }
         }
 
         void startTesting(int taskIndex, bool all) {
@@ -219,8 +359,21 @@ namespace {
                 s_tasks[m_taskIndex].finished = false;
             }
 
-            s_tasks[m_taskIndex].results.clear();
-            buildCandidates(s_tasks[m_taskIndex]);
+            auto& task = s_tasks[m_taskIndex];
+            task.results.clear();
+            task.kind = FrameWindowKind::Normal;
+            task.windowCount = 0;
+            task.windowLow = 0;
+            task.windowHigh = 0;
+            task.cbfOnly = false;
+            task.recoveryMode = false;
+
+            m_probeStage = ProbeStage::Primary;
+            m_alternatingRuns.clear();
+            m_pairRuns.clear();
+            m_alternatingOffsets.clear();
+
+            buildCandidates(task);
             m_candidateIndex = 0;
             m_targetSeen = false;
             m_attemptStartFrame = 0;
@@ -238,6 +391,24 @@ namespace {
             }
 
             if (m_candidateIndex >= static_cast<int>(m_candidates.size())) {
+                if (m_probeStage == ProbeStage::Primary) {
+                    buildAlternatingProbes(s_tasks[m_taskIndex]);
+                    if (!m_candidates.empty()) {
+                        m_candidateIndex = 0;
+                        beginCandidate();
+                        return;
+                    }
+                }
+
+                if (m_probeStage == ProbeStage::Alternating) {
+                    buildPairProbes(s_tasks[m_taskIndex]);
+                    if (!m_candidates.empty()) {
+                        m_candidateIndex = 0;
+                        beginCandidate();
+                        return;
+                    }
+                }
+
                 finalizeTaskWindow(s_tasks[m_taskIndex]);
                 s_tasks[m_taskIndex].finished = true;
 
@@ -261,32 +432,102 @@ namespace {
             }
 
             auto& task = s_tasks[m_taskIndex];
-            auto candidate = m_candidates[m_candidateIndex];
+            const auto candidate = m_candidates[m_candidateIndex];
 
             Macro candidateMacro = m_backupMacro;
-            int eventIndex = findTaskEvent(candidateMacro, task);
+            const int eventIndex = findTaskEvent(candidateMacro, task);
             if (eventIndex < 0) {
                 ++m_candidateIndex;
                 beginCandidate();
                 return;
             }
 
-            candidateMacro.inputs[eventIndex].frame = candidate.first;
-            candidateMacro.inputs[eventIndex].subframe = candidate.second;
+            candidateMacro.inputs[eventIndex].frame = candidate.frame;
+            candidateMacro.inputs[eventIndex].subframe = candidate.subframe;
+
+            m_probeContextShift = candidate.contextShift;
+            m_probePairedFrame = candidate.pairedFrame;
+            m_probePairedSubframe = candidate.pairedSubframe;
+
+            const int originalTaskIndex = findTaskEvent(m_backupMacro, task);
+
+            if (m_probeStage == ProbeStage::Alternating && originalTaskIndex >= 0) {
+                const int previous =
+                    findAdjacentEvent(m_backupMacro, originalTaskIndex, true);
+
+                if (previous >= 0) {
+                    const int livePrevious = findEventNear(
+                        candidateMacro,
+                        m_backupMacro.inputs[previous],
+                        m_backupMacro.inputs[previous].getPreciseFrame()
+                    );
+
+                    if (livePrevious >= 0) {
+                        candidateMacro.inputs[livePrevious].setPreciseFrame(
+                            m_backupMacro.inputs[previous].getPreciseFrame() +
+                            m_probeContextShift
+                        );
+                    }
+                }
+            }
+
+            if (m_probeStage == ProbeStage::Pair && originalTaskIndex >= 0) {
+                const int next =
+                    findAdjacentEvent(m_backupMacro, originalTaskIndex, false);
+
+                if (next >= 0) {
+                    const int liveNext = findEventNear(
+                        candidateMacro,
+                        m_backupMacro.inputs[next],
+                        m_probePairedFrame
+                    );
+
+                    if (liveNext >= 0) {
+                        candidateMacro.inputs[liveNext].frame = m_probePairedFrame;
+                        candidateMacro.inputs[liveNext].subframe =
+                            m_probePairedSubframe;
+                    }
+                }
+            }
+
             std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
 
-            // The timing is only considered successful if the player actually
-            // gets through the gap to the next input. This mirrors how real
-            // frame-window analyzers attribute a death to the shifted input
-            // instead of accepting an arbitrary survival lookahead.
+            const double candidatePrecise =
+                candidate.frame + candidate.subframe;
+
             m_passFrame = -1;
             m_passSubframe = 0.0;
-            const double candidatePrecise = candidate.first + candidate.second;
-            for (const auto& input : candidateMacro.inputs) {
-                if (input.getPreciseFrame() > candidatePrecise + 0.0001) {
-                    m_passFrame = input.frame;
-                    m_passSubframe = input.subframe;
-                    break;
+
+            if (m_probeStage == ProbeStage::Pair) {
+                const int next = findAdjacentEvent(
+                    candidateMacro,
+                    findTaskEvent(candidateMacro, task),
+                    false
+                );
+
+                if (next >= 0) {
+                    const int boundary = findNextSamePlayer(
+                        candidateMacro,
+                        task.player2,
+                        candidateMacro.inputs[next].getPreciseFrame()
+                    );
+
+                    if (boundary >= 0) {
+                        m_passFrame = candidateMacro.inputs[boundary].frame;
+                        m_passSubframe = candidateMacro.inputs[boundary].subframe;
+                    }
+                }
+            }
+
+            if (m_passFrame < 0) {
+                for (const auto& input : candidateMacro.inputs) {
+                    if (input.player2 == task.player2 &&
+                        input.button <= 3 &&
+                        input.getPreciseFrame() > candidatePrecise + 0.0001) {
+                        m_passFrame = input.frame;
+                        m_passSubframe = input.subframe;
+                        break;
+                    }
                 }
             }
 
@@ -299,8 +540,8 @@ namespace {
             g.firstAttempt = true;
             g.respawnFrame = -1;
 
-            m_targetFrame = candidate.first;
-            m_targetSubframe = candidate.second;
+            m_targetFrame = candidate.frame;
+            m_targetSubframe = candidate.subframe;
             m_targetSeen = false;
             m_attemptStartFrame = 0;
 
@@ -334,6 +575,14 @@ namespace {
                 if (player) {
                     m_targetPosition = player->getPosition();
                     m_targetSeen = true;
+
+                    if (player->m_isShip || player->m_isSwing) {
+                        m_recoveryProbe = true;
+                        s_tasks[m_taskIndex].recoveryMode = true;
+
+                        if (m_passFrame >= 0)
+                            m_passFrame += 8;
+                    }
                 }
             }
 
@@ -370,80 +619,247 @@ namespace {
             result.subframe = m_targetSubframe;
             result.passed = passed;
             result.position = m_targetPosition;
-            task.results.push_back(result);
+            if (m_probeStage == ProbeStage::Primary) {
+                task.results.push_back(result);
+            } else if (m_probeStage == ProbeStage::Alternating) {
+                m_alternatingRuns.push_back({
+                    m_probeContextShift,
+                    result.frame - task.frame,
+                    passed
+                });
+            } else {
+                m_pairRuns.push_back({
+                    m_probeContextShift,
+                    m_probePairedFrame - m_pairBaseFrame,
+                    passed
+                });
+            }
 
             ++m_candidateIndex;
             beginCandidate();
         }
 
-        void finalizeTaskWindow(FrameTask& task) {
-            if (task.results.empty())
-                return;
+        bool hasAlternatingBehavior() const {
+            if (m_alternatingRuns.empty() || m_alternatingOffsets.empty())
+                return false;
 
-            std::sort(task.results.begin(), task.results.end(), [](const auto& a, const auto& b) {
-                if (a.frame != b.frame)
-                    return a.frame < b.frame;
-                return a.subframe < b.subframe;
-            });
+            int oddChanges = 0;
+            int evenChanges = 0;
 
-            const double center = task.frame + task.subframe;
-            int centerIndex = -1;
-            double centerDistance = std::numeric_limits<double>::max();
+            for (int targetShift : m_alternatingOffsets) {
+                bool minus = false;
+                bool zero = false;
+                bool plus = false;
 
-            for (int i = 0; i < static_cast<int>(task.results.size()); ++i) {
-                double distance = std::abs(
-                    task.results[i].frame + task.results[i].subframe - center
+                for (const auto& run : m_alternatingRuns) {
+                    if (run.targetShift != targetShift)
+                        continue;
+
+                    if (run.contextShift == -1)
+                        minus = run.passed;
+                    else if (run.contextShift == 0)
+                        zero = run.passed;
+                    else if (run.contextShift == 1)
+                        plus = run.passed;
+                }
+
+                if (minus == zero && plus == zero)
+                    continue;
+
+                if (std::abs(targetShift) % 2)
+                    ++oddChanges;
+                else
+                    ++evenChanges;
+            }
+
+            return oddChanges >= 2 && oddChanges > evenChanges + 1;
+        }
+
+        bool hasDependentRelationship(bool& shared) const {
+            shared = false;
+
+            if (m_pairRuns.empty())
+                return false;
+
+            struct Row {
+                int a = 0;
+                int minB = 1000000;
+                int maxB = -1000000;
+            };
+
+            std::vector<Row> rows;
+
+            for (const auto& run : m_pairRuns) {
+                if (!run.passed)
+                    continue;
+
+                auto it = std::find_if(
+                    rows.begin(),
+                    rows.end(),
+                    [&](const Row& row) {
+                        return row.a == run.contextShift;
+                    }
                 );
-                if (distance < centerDistance) {
-                    centerDistance = distance;
-                    centerIndex = i;
+
+                if (it == rows.end()) {
+                    rows.push_back({
+                        run.contextShift,
+                        run.pairedShift,
+                        run.pairedShift
+                    });
+                } else {
+                    it->minB = std::min(it->minB, run.pairedShift);
+                    it->maxB = std::max(it->maxB, run.pairedShift);
                 }
             }
 
-            // The selected timing is the anchor. A frame is part of the
-            // window only while every timing between it and the anchor also
-            // passes. A failed gap therefore prevents later, disconnected
-            // timings from being counted.
-            if (centerIndex < 0 || !task.results[centerIndex].passed) {
-                task.results.clear();
+            if (rows.size() < 3)
+                return false;
+
+            std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+                return a.a < b.a;
+            });
+
+            int negativeSteps = 0;
+            int minWidth = 1000000;
+            int maxWidth = 0;
+
+            for (size_t i = 0; i < rows.size(); ++i) {
+                const int width = rows[i].maxB - rows[i].minB + 1;
+                minWidth = std::min(minWidth, width);
+                maxWidth = std::max(maxWidth, width);
+
+                if (i > 0 && rows[i].minB < rows[i - 1].minB)
+                    ++negativeSteps;
+            }
+
+            if (negativeSteps < 2)
+                return false;
+
+            shared = maxWidth - minWidth <= 2;
+            return true;
+        }
+
+        void finalizeTaskWindow(FrameTask& task) {
+            int integerCount = 0;
+            int subframeCount = 0;
+            int first = std::numeric_limits<int>::max();
+            int last = std::numeric_limits<int>::min();
+            int previous = std::numeric_limits<int>::min();
+            bool hole = false;
+
+            for (const auto& result : task.results) {
+                if (!result.passed)
+                    continue;
+
+                if (std::abs(result.subframe) < 0.0001) {
+                    ++integerCount;
+                    first = std::min(first, result.frame);
+                    last = std::max(last, result.frame);
+
+                    if (previous != std::numeric_limits<int>::min() &&
+                        result.frame > previous + 1)
+                        hole = true;
+
+                    previous = result.frame;
+                } else {
+                    ++subframeCount;
+                }
+            }
+
+            task.windowCount = integerCount > 0 ? integerCount : subframeCount;
+            task.windowLow =
+                first == std::numeric_limits<int>::max() ? 0 : first;
+            task.windowHigh =
+                last == std::numeric_limits<int>::min() ? 0 : last;
+
+            if (integerCount == 0) {
+                task.kind = FrameWindowKind::Impossible;
+                task.cbfOnly = subframeCount > 0;
+            } else if (hole) {
+                task.kind = FrameWindowKind::Disconnected;
+            } else if (task.recoveryMode) {
+                task.kind = FrameWindowKind::Recovery;
+            } else if (hasAlternatingBehavior()) {
+                task.kind = FrameWindowKind::Alternating;
+            } else {
+                bool shared = false;
+
+                if (hasDependentRelationship(shared))
+                    task.kind =
+                        shared ? FrameWindowKind::Shared : FrameWindowKind::Optimal;
+                else
+                    task.kind = FrameWindowKind::Normal;
+            }
+
+            for (const auto& result : task.results) {
+                if (result.passed)
+                    addMarker(result);
+            }
+        }
+
+        void buildAlternatingProbes(const FrameTask& task) {
+            m_candidates.clear();
+            m_alternatingRuns.clear();
+
+            const int eventIndex = findTaskEvent(m_backupMacro, task);
+            const int previous =
+                findAdjacentEvent(m_backupMacro, eventIndex, true);
+
+            if (previous < 0)
                 return;
+
+            m_alternatingOffsets = sampleOffsets(validOffsets(task), 7);
+            if (m_alternatingOffsets.empty())
+                return;
+
+            m_probeStage = ProbeStage::Alternating;
+
+            for (int contextShift : {-1, 0, 1}) {
+                for (int offset : m_alternatingOffsets) {
+                    m_candidates.push_back({
+                        task.frame + offset,
+                        0.0,
+                        contextShift,
+                        0,
+                        0.0,
+                        false,
+                        true
+                    });
+                }
             }
+        }
 
-            auto isAdjacent = [](const FrameTaskResult& a, const FrameTaskResult& b) {
-                const double delta =
-                    (b.frame + b.subframe) - (a.frame + a.subframe);
+        void buildPairProbes(const FrameTask& task) {
+            m_candidates.clear();
+            m_pairRuns.clear();
 
-                // Whole-frame probing uses 1.0. CBF probing uses the smaller
-                // subframe step, so accept either a normal frame or a .1
-                // subframe increment.
-                return std::abs(delta - 1.0) < 0.0001 ||
-                       std::abs(delta - 0.1) < 0.0001;
-            };
+            const int eventIndex = findTaskEvent(m_backupMacro, task);
+            const int next = findAdjacentEvent(m_backupMacro, eventIndex, false);
 
-            int first = centerIndex;
-            int last = centerIndex;
+            if (next < 0)
+                return;
 
-            while (first > 0 &&
-                   task.results[first - 1].passed &&
-                   isAdjacent(task.results[first - 1], task.results[first])) {
-                --first;
+            const auto offsets = sampleOffsets(validOffsets(task), 5);
+            if (offsets.empty())
+                return;
+
+            m_probeStage = ProbeStage::Pair;
+            m_pairBaseFrame = m_backupMacro.inputs[next].frame;
+
+            for (int aOffset : offsets) {
+                for (int bOffset = -5; bOffset <= 5; ++bOffset) {
+                    m_candidates.push_back({
+                        task.frame + aOffset,
+                        0.0,
+                        aOffset,
+                        m_pairBaseFrame + bOffset,
+                        m_backupMacro.inputs[next].subframe,
+                        true,
+                        false
+                    });
+                }
             }
-
-            while (last + 1 < static_cast<int>(task.results.size()) &&
-                   task.results[last + 1].passed &&
-                   isAdjacent(task.results[last], task.results[last + 1])) {
-                ++last;
-            }
-
-            std::vector<FrameTaskResult> window(
-                task.results.begin() + first,
-                task.results.begin() + last + 1
-            );
-
-            task.results = std::move(window);
-
-            for (const auto& result : task.results)
-                addMarker(result);
         }
 
         void addMarker(const FrameTaskResult& result) {
@@ -553,7 +969,35 @@ namespace {
         bool m_backupRestart = false;
         bool m_backupFirstAttempt = false;
 
-        std::vector<std::pair<int, double>> m_candidates;
+        enum class ProbeStage {
+            Primary,
+            Alternating,
+            Pair
+        };
+
+        struct AlternatingRun {
+            int contextShift = 0;
+            int targetShift = 0;
+            bool passed = false;
+        };
+
+        struct PairRun {
+            int contextShift = 0;
+            int pairedShift = 0;
+            bool passed = false;
+        };
+
+        ProbeStage m_probeStage = ProbeStage::Primary;
+        std::vector<FrameTaskProbe> m_candidates;
+        std::vector<AlternatingRun> m_alternatingRuns;
+        std::vector<PairRun> m_pairRuns;
+        std::vector<int> m_alternatingOffsets;
+
+        int m_probeContextShift = 0;
+        int m_probePairedFrame = 0;
+        double m_probePairedSubframe = 0.0;
+        int m_pairBaseFrame = 0;
+        bool m_recoveryProbe = false;
 
         static inline std::vector<FrameTask> s_tasks;
     };
