@@ -123,7 +123,32 @@ namespace {
                 startTesting(index, false);
         }
 
+        void generateAllTasks() {
+            if (!m_timeline)
+                return;
+
+            auto const* events = m_timeline->getEvents();
+            if (!events)
+                return;
+
+            s_tasks.clear();
+            s_tasks.reserve(events->size());
+
+            for (auto const& event : *events) {
+                FrameTask task;
+                task.frame = event.frame;
+                task.subframe = event.subframe;
+                task.button = event.button;
+                task.player2 = event.player2;
+                task.down = event.down;
+                s_tasks.push_back(task);
+            }
+        }
+
         void onStartAll(CCObject*) {
+            if (s_tasks.empty())
+                generateAllTasks();
+
             if (s_tasks.empty())
                 return;
 
@@ -1084,13 +1109,16 @@ class $modify(FLAlertLayer) {
 
 MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     MacroTimelineLayer* ret = new MacroTimelineLayer();
+
+    ret->macro = macro;
+    ret->timeline = std::make_unique<MacroTimeline>(macro);
+    ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
+
     if (ret->initAnchored(900, 600, macro, Utils::getTexture().c_str())) {
-        ret->macro = macro;
-        ret->timeline = std::make_unique<MacroTimeline>(macro);
-        ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
         ret->autorelease();
         return ret;
     }
+
     delete ret;
     return nullptr;
 }

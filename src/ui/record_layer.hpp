@@ -7,6 +7,7 @@
 #include "render_settings_layer.hpp"
 #include "save_macro_layer.hpp"
 #include "macro_info_layer.hpp"
+#include "macro_timeline_layer.hpp"
 
 enum InputType {
 	None,
@@ -127,6 +128,7 @@ public:
 	void setToggleMember(CCMenuItemToggler* toggle, std::string id);
 
 	void onEditMacro(CCObject*);
+	void onTimeline(CCObject*);
 
 	void macroInfo(CCObject*);
 

@@ -271,6 +271,11 @@ void RecordLayer::onEditMacro(CCObject*) {
     MacroEditLayer::open();
 }
 
+void RecordLayer::onTimeline(CCObject*) {
+    if (auto* layer = MacroTimelineLayer::create(&Global::get().macro))
+        layer->show();
+}
+
 void RecordLayer::toggleFPS(bool on) { // forgotten
     return;
     float scaleSpr = -0.8, scaleBtn = -1;
@@ -760,6 +765,16 @@ bool RecordLayer::setup() {
         menu_selector(RecordLayer::onEditMacro));
 
     btn->setPosition(ccp(-56, 34));
+    menu->addChild(btn);
+
+    btnSprite = ButtonSprite::create("Timeline");
+    btnSprite->setScale(0.54f);
+
+    btn = CCMenuItemSpriteExtra::create(btnSprite,
+        this,
+        menu_selector(RecordLayer::onTimeline));
+
+    btn->setPosition(ccp(5, 34));
     menu->addChild(btn);
 
     widthInput = CCTextInputNode::create(150, 30, "Width", "chatFont.fnt");
