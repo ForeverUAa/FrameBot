@@ -238,6 +238,7 @@ namespace {
             }
 
             if (m_candidateIndex >= static_cast<int>(m_candidates.size())) {
+                finalizeTaskWindow(s_tasks[m_taskIndex]);
                 s_tasks[m_taskIndex].finished = true;
 
                 if (m_testingAll && m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
@@ -273,6 +274,21 @@ namespace {
             candidateMacro.inputs[eventIndex].frame = candidate.first;
             candidateMacro.inputs[eventIndex].subframe = candidate.second;
             std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
+
+            // The timing is only considered successful if the player actually
+            // gets through the gap to the next input. This mirrors how real
+            // frame-window analyzers attribute a death to the shifted input
+            // instead of accepting an arbitrary survival lookahead.
+            m_passFrame = -1;
+            m_passSubframe = 0.0;
+            const double candidatePrecise = candidate.first + candidate.second;
+            for (const auto& input : candidateMacro.inputs) {
+                if (input.getPreciseFrame() > candidatePrecise + 0.0001) {
+                    m_passFrame = input.frame;
+                    m_passSubframe = input.subframe;
+                    break;
+                }
+            }
 
             auto& g = Global::get();
             g.macro = candidateMacro;
@@ -331,10 +347,15 @@ namespace {
                 return;
             }
 
-            // Surviving a lookahead after the tested input is the pass
-            // criterion. This prevents an input from being called valid just
-            // because it did not kill the player on the exact tested frame.
-            if (m_targetSeen && frame >= m_targetFrame + 12)
+            // A window ends at the next macro input. Reaching that input
+            // means the player made it through the gap being tested. If this
+            // is the last input, use a small fallback lookahead because there
+            // is no later input to act as the boundary.
+            const int passFrame = m_passFrame >= 0
+                ? m_passFrame
+                : m_targetFrame + 12;
+
+            if (m_targetSeen && frame >= passFrame)
                 recordResult(true);
         }
 
@@ -351,11 +372,78 @@ namespace {
             result.position = m_targetPosition;
             task.results.push_back(result);
 
-            if (passed)
-                addMarker(result);
-
             ++m_candidateIndex;
             beginCandidate();
+        }
+
+        void finalizeTaskWindow(FrameTask& task) {
+            if (task.results.empty())
+                return;
+
+            std::sort(task.results.begin(), task.results.end(), [](const auto& a, const auto& b) {
+                if (a.frame != b.frame)
+                    return a.frame < b.frame;
+                return a.subframe < b.subframe;
+            });
+
+            const double center = task.frame + task.subframe;
+            int centerIndex = -1;
+            double centerDistance = std::numeric_limits<double>::max();
+
+            for (int i = 0; i < static_cast<int>(task.results.size()); ++i) {
+                double distance = std::abs(
+                    task.results[i].frame + task.results[i].subframe - center
+                );
+                if (distance < centerDistance) {
+                    centerDistance = distance;
+                    centerIndex = i;
+                }
+            }
+
+            // The selected timing is the anchor. A frame is part of the
+            // window only while every timing between it and the anchor also
+            // passes. A failed gap therefore prevents later, disconnected
+            // timings from being counted.
+            if (centerIndex < 0 || !task.results[centerIndex].passed) {
+                task.results.clear();
+                return;
+            }
+
+            auto isAdjacent = [](const FrameTaskResult& a, const FrameTaskResult& b) {
+                const double delta =
+                    (b.frame + b.subframe) - (a.frame + a.subframe);
+
+                // Whole-frame probing uses 1.0. CBF probing uses the smaller
+                // subframe step, so accept either a normal frame or a .1
+                // subframe increment.
+                return std::abs(delta - 1.0) < 0.0001 ||
+                       std::abs(delta - 0.1) < 0.0001;
+            };
+
+            int first = centerIndex;
+            int last = centerIndex;
+
+            while (first > 0 &&
+                   task.results[first - 1].passed &&
+                   isAdjacent(task.results[first - 1], task.results[first])) {
+                --first;
+            }
+
+            while (last + 1 < static_cast<int>(task.results.size()) &&
+                   task.results[last + 1].passed &&
+                   isAdjacent(task.results[last], task.results[last + 1])) {
+                ++last;
+            }
+
+            std::vector<FrameTaskResult> window(
+                task.results.begin() + first,
+                task.results.begin() + last + 1
+            );
+
+            task.results = std::move(window);
+
+            for (const auto& result : task.results)
+                addMarker(result);
         }
 
         void addMarker(const FrameTaskResult& result) {
@@ -452,6 +540,8 @@ namespace {
         int m_candidateIndex = 0;
         int m_targetFrame = 0;
         double m_targetSubframe = 0.0;
+        int m_passFrame = -1;
+        double m_passSubframe = 0.0;
         int m_attemptStartFrame = 0;
         bool m_targetSeen = false;
         CCPoint m_targetPosition = {0, 0};
