@@ -963,7 +963,7 @@ namespace {
                 formatTime(result.frame, result.subframe).c_str(),
                 "chatFont.fnt"
             );
-            label->setScale(0.3f);
+            label->setScale(0.34f);
             label->setAnchorPoint({0.5f, 0.0f});
             label->setPosition({result.position.x, result.position.y + 11.0f});
             markerLayer->addChild(label);
@@ -1081,7 +1081,7 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     ret->timeline = std::make_unique<MacroTimeline>(macro);
     ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
 
-    if (ret->initAnchored(760, 470, macro, Utils::getTexture().c_str())) {
+    if (ret->initAnchored(720, 420, macro, Utils::getTexture().c_str())) {
         ret->autorelease();
         return ret;
     }
@@ -1120,46 +1120,46 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
 
 void MacroTimelineLayer::initToolbar() {
     toolbarMenu = CCMenu::create();
-    toolbarMenu->setPosition({0.0f, 188.0f});
+    toolbarMenu->setPosition({0.0f, 164.0f});
     toolbarMenu->setZOrder(100);
     m_mainLayer->addChild(toolbarMenu);
 
     auto addButton = [&](const char* text, float x, SEL_MenuHandler cb) {
         auto* sprite = ButtonSprite::create(text);
-        sprite->setScale(0.42f);
+        sprite->setScale(0.54f);
         auto* item = CCMenuItemSpriteExtra::create(sprite, this, cb);
         item->setPositionX(x);
         toolbarMenu->addChild(item);
         return item;
     };
 
-    playBtn = addButton("Play", -150.0f, menu_selector(MacroTimelineLayer::onPlayPressed));
-    pauseBtn = addButton("Pause", -105.0f, menu_selector(MacroTimelineLayer::onPausePressed));
-    stopBtn = addButton("Stop", -58.0f, menu_selector(MacroTimelineLayer::onStopPressed));
-    stepFrameBtn = addButton("Step", -10.0f, menu_selector(MacroTimelineLayer::onStepFramePressed));
-    cbfModeToggle = addButton("CBF", 38.0f, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
-    zoomOutBtn = addButton("Zoom -", 90.0f, menu_selector(MacroTimelineLayer::onZoomOutPressed));
-    zoomInBtn = addButton("Zoom +", 145.0f, menu_selector(MacroTimelineLayer::onZoomInPressed));
+    playBtn = addButton("Play", -142.0f, menu_selector(MacroTimelineLayer::onPlayPressed));
+    pauseBtn = addButton("Pause", -94.0f, menu_selector(MacroTimelineLayer::onPausePressed));
+    stopBtn = addButton("Stop", -45.0f, menu_selector(MacroTimelineLayer::onStopPressed));
+    stepFrameBtn = addButton("Step", 4.0f, menu_selector(MacroTimelineLayer::onStepFramePressed));
+    cbfModeToggle = addButton("CBF", 53.0f, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
+    zoomOutBtn = addButton("Zoom -", 105.0f, menu_selector(MacroTimelineLayer::onZoomOutPressed));
+    zoomInBtn = addButton("Zoom +", 160.0f, menu_selector(MacroTimelineLayer::onZoomInPressed));
 
     auto* taskSprite = ButtonSprite::create("Tasks");
-    taskSprite->setScale(0.42f);
+    taskSprite->setScale(0.54f);
     auto* taskBtn = CCMenuItemSpriteExtra::create(
         taskSprite,
         this,
         menu_selector(MacroTimelineLayer::onTasksPressed)
     );
-    taskBtn->setPositionX(198.0f);
+    taskBtn->setPositionX(213.0f);
     taskBtn->setID("tasks");
     toolbarMenu->addChild(taskBtn);
 }
 
 void MacroTimelineLayer::initTimeline() {
-    constexpr float left = -370.0f;
-    constexpr float bottom = -150.0f;
+    constexpr float left = -350.0f;
+    constexpr float bottom = -132.0f;
 
-    renderState.timelineSize = CCSizeMake(500.0f, 300.0f);
-    renderState.rulerHeight = 28.0f;
-    renderState.trackHeight = 136.0f;
+    renderState.timelineSize = CCSizeMake(460.0f, 264.0f);
+    renderState.rulerHeight = 26.0f;
+    renderState.trackHeight = 119.0f;
     renderState.eventHeight = 18.0f;
 
     timelineLayer = CCLayer::create();
@@ -1197,23 +1197,23 @@ void MacroTimelineLayer::initTimeline() {
     timelineLayer->addChild(cursorLayer);
 
     frameCounterLabel = CCLabelBMFont::create("Frame: 0", "chatFont.fnt");
-    frameCounterLabel->setScale(0.38f);
+    frameCounterLabel->setScale(0.42f);
     frameCounterLabel->setAnchorPoint({0.0f, 0.5f});
-    frameCounterLabel->setPosition({left + 4.0f, bottom + renderState.timelineSize.height + 13.0f});
+    frameCounterLabel->setPosition({left + 4.0f, bottom + renderState.timelineSize.height + 12.0f});
     m_mainLayer->addChild(frameCounterLabel);
 
     subframeLabel = CCLabelBMFont::create("Subframe: 0%", "chatFont.fnt");
-    subframeLabel->setScale(0.38f);
+    subframeLabel->setScale(0.42f);
     subframeLabel->setAnchorPoint({0.0f, 0.5f});
     subframeLabel->setPosition({left + 92.0f, bottom + renderState.timelineSize.height + 13.0f});
     m_mainLayer->addChild(subframeLabel);
 }
 
 void MacroTimelineLayer::initInspector() {
-    constexpr float width = 200.0f;
-    constexpr float height = 300.0f;
-    constexpr float left = 140.0f;
-    constexpr float bottom = -150.0f;
+    constexpr float width = 180.0f;
+    constexpr float height = 264.0f;
+    constexpr float left = 120.0f;
+    constexpr float bottom = -132.0f;
 
     inspectorBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     inspectorBg->setContentSize({width, height});
@@ -1224,7 +1224,7 @@ void MacroTimelineLayer::initInspector() {
     m_mainLayer->addChild(inspectorBg);
 
     auto* title = CCLabelBMFont::create("Event Inspector", "bigFont.fnt");
-    title->setScale(0.34f);
+    title->setScale(0.40f);
     title->setPosition({width / 2.0f, height - 20.0f});
     inspectorBg->addChild(title);
 
@@ -1234,25 +1234,25 @@ void MacroTimelineLayer::initInspector() {
 
     auto addButton = [&](const char* text, float x, float y, SEL_MenuHandler cb) {
         auto* label = CCLabelBMFont::create(text, "bigFont.fnt");
-        label->setScale(0.29f);
+        label->setScale(0.34f);
         auto* item = CCMenuItemLabel::create(label, this, cb);
         item->setPosition({x, y});
         inspectorMenu->addChild(item);
     };
 
-    addButton("-", 24.0f, 244.0f, menu_selector(MacroTimelineLayer::onFrameDown));
-    addButton("+", 176.0f, 244.0f, menu_selector(MacroTimelineLayer::onFrameUp));
-    addButton("-", 24.0f, 213.0f, menu_selector(MacroTimelineLayer::onSubframeDown));
-    addButton("+", 176.0f, 213.0f, menu_selector(MacroTimelineLayer::onSubframeUp));
-    addButton("Button", 100.0f, 178.0f, menu_selector(MacroTimelineLayer::onButtonCycle));
-    addButton("Player", 52.0f, 148.0f, menu_selector(MacroTimelineLayer::onPlayerToggle));
-    addButton("Action", 148.0f, 148.0f, menu_selector(MacroTimelineLayer::onActionToggle));
+    addButton("-", 22.0f, 214.0f, menu_selector(MacroTimelineLayer::onFrameDown));
+    addButton("+", 158.0f, 214.0f, menu_selector(MacroTimelineLayer::onFrameUp));
+    addButton("-", 22.0f, 185.0f, menu_selector(MacroTimelineLayer::onSubframeDown));
+    addButton("+", 158.0f, 185.0f, menu_selector(MacroTimelineLayer::onSubframeUp));
+    addButton("Button", 90.0f, 151.0f, menu_selector(MacroTimelineLayer::onButtonCycle));
+    addButton("Player", 47.0f, 125.0f, menu_selector(MacroTimelineLayer::onPlayerToggle));
+    addButton("Action", 133.0f, 125.0f, menu_selector(MacroTimelineLayer::onActionToggle));
 
     for (int i = 0; i < 8; ++i) {
         inspectorLabels[i] = CCLabelBMFont::create("", "chatFont.fnt");
-        inspectorLabels[i]->setScale(0.285f);
+        inspectorLabels[i]->setScale(0.32f);
         inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
-        inspectorLabels[i]->setPosition({10.0f, 121.0f - i * 14.0f});
+        inspectorLabels[i]->setPosition({10.0f, 108.0f - i * 13.0f});
         inspectorBg->addChild(inspectorLabels[i]);
     }
 }
@@ -1347,7 +1347,7 @@ void MacroTimelineLayer::renderEvents() {
             getButtonName(evt.button).c_str(),
             "chatFont.fnt"
         );
-        btnLabel->setScale(0.25f);
+        btnLabel->setScale(0.30f);
         btnLabel->setPosition(ccp(x, y));
         btnLabel->setColor({235, 235, 235});
         btnLabel->setZOrder(selected ? 21 : 11);
