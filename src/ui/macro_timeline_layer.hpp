@@ -26,7 +26,7 @@ public:
     void onTouchEnded(CCTouch* touch, CCEvent* event);
 
 private:
-    bool setup() override;
+    bool setup(Macro* macro) override;
     void keyBackClicked();
 
     Macro* macro = nullptr;
@@ -108,6 +108,7 @@ private:
     void onButtonCycle(CCObject*);
     void onPlayerToggle(CCObject*);
     void onActionToggle(CCObject*);
+    void onTasksPressed(CCObject*);
 
     // Helper functions
     std::string getButtonName(int button) const;

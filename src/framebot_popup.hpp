@@ -35,6 +35,7 @@ public:
             if (!geode::Popup::init(width, height, std::get<0>(tuple)))
                 return false;
 
+            static_assert(sizeof...(Args) == 0);
             return setup();
         }
         else if constexpr (

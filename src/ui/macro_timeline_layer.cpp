@@ -589,7 +589,7 @@ namespace {
             m_targetFrame = candidate.frame;
             m_targetSubframe = candidate.subframe;
             m_targetSeen = false;
-            m_targetPosition = {0, 0};
+            m_targetPosition = CCPoint{0.0f, 0.0f};
             m_attemptStartFrame = 0;
 
             pl->resetLevelFromStart();
@@ -968,8 +968,6 @@ namespace {
             }
 
             Macro::updateTPS();
-            Interface::updateLabels();
-            Interface::updateButtons();
 
             refreshList();
 
@@ -1086,7 +1084,7 @@ class $modify(FLAlertLayer) {
 
 MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     MacroTimelineLayer* ret = new MacroTimelineLayer();
-    if (ret->initAnchored(900, 600, Utils::getTexture().c_str())) {
+    if (ret->initAnchored(900, 600, macro, Utils::getTexture().c_str())) {
         ret->macro = macro;
         ret->timeline = std::make_unique<MacroTimeline>(macro);
         ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
@@ -1099,8 +1097,8 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
 
 MacroTimelineLayer::~MacroTimelineLayer() {}
 
-bool MacroTimelineLayer::setup() {
-    if (!Popup::setup()) return false;
+bool MacroTimelineLayer::setup(Macro* setupMacro) {
+    macro = setupMacro;
 
     this->setKeypadEnabled(true);
     this->setTouchEnabled(true);
@@ -1117,6 +1115,11 @@ bool MacroTimelineLayer::setup() {
 
 void MacroTimelineLayer::keyBackClicked() {
     this->onClose(nullptr);
+}
+
+void MacroTimelineLayer::onTasksPressed(CCObject*) {
+    auto popup = FrameTaskPopup::create(timeline.get());
+    if (popup) popup->show();
 }
 
 void MacroTimelineLayer::initToolbar() {
@@ -1171,10 +1174,8 @@ void MacroTimelineLayer::initToolbar() {
     taskLabel->setScale(0.35f);
     auto taskBtn = CCMenuItemLabel::create(
         taskLabel,
-        [this](CCObject*) {
-            auto popup = FrameTaskPopup::create(timeline.get());
-            if (popup) popup->show();
-        }
+        this,
+        menu_selector(MacroTimelineLayer::onTasksPressed)
     );
     taskBtn->setPositionX(240);
     taskBtn->setTag(7);
@@ -1290,7 +1291,7 @@ void MacroTimelineLayer::initInspector() {
         inspectorLabels[i] = CCLabelBMFont::create("", "chatFont.fnt");
         inspectorLabels[i]->setScale(0.35f);
         inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
-        inspectorLabels[i]->setPosition({12, 115 - i * 14});
+        inspectorLabels[i]->setPosition({12.0f, static_cast<float>(115 - i * 14)});
         inspectorBg->addChild(inspectorLabels[i]);
     }
 }
@@ -1332,7 +1333,7 @@ void MacroTimelineLayer::renderEvents() {
         CCScale9Sprite* eventBox = CCScale9Sprite::create("GJ_square_02_001.png");
         eventBox->setScale(1.0f);
         eventBox->setContentSize({8, renderState.eventHeight});
-        eventBox->setPosition({x, y});
+        eventBox->setPosition({x, static_cast<float>(y)});
         eventBox->setColor(color);
         eventBox->setOpacity(selected ? 255 : 180);
         eventBox->setZOrder(selected ? 20 : 10);
@@ -1344,7 +1345,7 @@ void MacroTimelineLayer::renderEvents() {
             "chatFont.fnt"
         );
         btnLabel->setScale(0.25f);
-        btnLabel->setPosition({x, y});
+        btnLabel->setPosition({x, static_cast<float>(y)});
         btnLabel->setColor({255, 255, 255});
         btnLabel->setZOrder(selected ? 21 : 11);
         eventsLayer->addChild(btnLabel);
