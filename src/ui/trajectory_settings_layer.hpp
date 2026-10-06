@@ -1,7 +1,7 @@
 #include "../includes.hpp"
 #include "../hacks/show_trajectory.hpp"
 
-class TrajectorySettingsLayer : public framebot::Popup<>, public ColorPickPopupDelegate, public TextInputDelegate {
+class TrajectorySettingsLayer : public framebot::Popup<>, public TextInputDelegate {
 
 public:
 
@@ -120,11 +120,11 @@ private:
 		ColorChannelSprite* color = static_cast<CCNode*>(obj)->getTag() == 1 ? color1 : color2;
 		ColorPickPopup* popup = ColorPickPopup::create(color->getColor());
 		popup->setColorTarget(color);
-		popup->setDelegate(this);
+		popup->setCallback([this](const cocos2d::ccColor4B&) { updateColor({}); });
 		popup->show();
 	}
 
-	void updateColor(const cocos2d::ccColor4B&) override {
+	void updateColor(const cocos2d::ccColor4B&) {
 		ShowTrajectory& t = ShowTrajectory::get();
 		t.color1 = ccc4FFromccc3B(color1->getColor());
 		t.color2 = ccc4FFromccc3B(color2->getColor());

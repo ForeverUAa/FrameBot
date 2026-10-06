@@ -192,7 +192,6 @@ private:
 		holdLbl->setOpacity(g.autoclickerP1 ? 86 : 23);
 		holdInput->getBGSprite()->setOpacity(g.autoclickerP1 ? 90 : 30);
 		holdInput->setEnabled(g.autoclickerP1);
-		holdInput->getInputNode()->m_placeholderLabel->setOpacity(g.autoclickerP1 ? 255 : 100);
 		if (!g.autoclickerP1) {
 			holdInput->getInputNode()->detachWithIME();
 			holdInput->getInputNode()->onClickTrackNode(false);
@@ -203,7 +202,6 @@ private:
 		holdLbl2->setOpacity(g.autoclickerP2 ? 86 : 23);
 		holdInput2->getBGSprite()->setOpacity(g.autoclickerP2 ? 90 : 30);
 		holdInput2->setEnabled(g.autoclickerP2);
-		holdInput2->getInputNode()->m_placeholderLabel->setOpacity(g.autoclickerP2 ? 255 : 100);
 		if (!g.autoclickerP2) {
 			holdInput2->getInputNode()->detachWithIME();
 			holdInput2->getInputNode()->onClickTrackNode(false);
@@ -214,7 +212,6 @@ private:
 		releaseLbl->setOpacity(g.autoclickerP1 ? 86 : 23);
 		releaseInput->getBGSprite()->setOpacity(g.autoclickerP1 ? 90 : 30);
 		releaseInput->setEnabled(g.autoclickerP1);
-		releaseInput->getInputNode()->m_placeholderLabel->setOpacity(g.autoclickerP1 ? 255 : 100);
 		if (!g.autoclickerP1) {
 			releaseInput->getInputNode()->detachWithIME();
 			releaseInput->getInputNode()->onClickTrackNode(false);
@@ -225,7 +222,6 @@ private:
 		releaseLbl2->setOpacity(g.autoclickerP2 ? 86 : 23);
 		releaseInput2->getBGSprite()->setOpacity(g.autoclickerP2 ? 90 : 30);
 		releaseInput2->setEnabled(g.autoclickerP2);
-		releaseInput2->getInputNode()->m_placeholderLabel->setOpacity(g.autoclickerP2 ? 255 : 100);
 		if (!g.autoclickerP2) {
 			releaseInput2->getInputNode()->detachWithIME();
 			releaseInput2->getInputNode()->onClickTrackNode(false);

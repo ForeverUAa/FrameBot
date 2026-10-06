@@ -20,6 +20,10 @@ private:
     }
 
 public:
+    void closePopup() {
+        this->onClose(nullptr);
+    }
+
     template <class... InitArgs>
     bool initAnchored(float width, float height, InitArgs&&... args) {
         constexpr std::size_t count = sizeof...(InitArgs);

@@ -144,9 +144,11 @@ void LoadMacroLayer::onImportMacro(CCObject*) {
 	textFilter.files = { "*.gdr", "*.xd", "*.json" };
 	fileOptions.filters.push_back(textFilter);
 
-	file::pick(file::PickMode::OpenFile, { dirs::getGameDir(), { textFilter } }).listen([this](Result<std::filesystem::path>* res) {
-		if (res->isOk()) {
-			std::filesystem::path path = res->unwrapOrDefault();
+	geode::async::spawn(file::pick(file::PickMode::OpenFile, { dirs::getGameDir(), { textFilter } }), [this](file::PickResult res) {
+		if (res.isOk()) {
+			auto pathResult = res.unwrap();
+			if (!pathResult) return;
+			std::filesystem::path path = *pathResult;
 
 			auto& g = Global::get();
 			Macro tempMacro;
@@ -458,14 +460,12 @@ void LoadMacroLayer::addList(bool refresh, float prevScroll) {
 
 	cocos2d::ccColor3B color = Mod::get()->getSettingValue<cocos2d::ccColor3B>("background_color");
 
-	CCArray* children = contentLayer->getChildren();
-	CCObject* child;
 	int it = 0;
 
 	cocos2d::ccColor3B color1 = ccc3(std::max(0, color.r - 70), std::max(0, color.g - 70), std::max(0, color.b - 70));
 	cocos2d::ccColor3B color2 = ccc3(std::max(0, color.r - 55), std::max(0, color.g - 55), std::max(0, color.b - 55));
 
-	CCARRAY_FOREACH(children, child) {
+	for (CCNode* child : contentLayer->getChildrenExt()) {
 		if (GenericListCell* cell = typeinfo_cast<GenericListCell*>(child)) {
 			allMacros.push_back(static_cast<MacroCell*>(cell->getChildren()->objectAtIndex(2)));
 
@@ -696,7 +696,7 @@ void MacroCell::handleLoad() {
 
 		if (mergeLayer) {
 			typeinfo_cast<MacroEditLayer*>(mergeLayer)->mergeMacro(newMacro.inputs, players, static_cast<LoadMacroLayer*>(loadLayer)->owToggle->isToggled());
-			loadLayer->keyBackClicked();
+			if (auto popup = typeinfo_cast<framebot::Popup<>*>(loadLayer)) popup->closePopup();
 		}
 
 		return;
@@ -715,7 +715,7 @@ void MacroCell::handleLoad() {
 	RecordLayer* newLayer = nullptr;
 
 	if (RecordLayer* layer = typeinfo_cast<RecordLayer*>(menuLayer)) {
-		layer->keyBackClicked();
+		layer->closePopup();
 		newLayer = RecordLayer::openMenu(true);
 	}
 
