@@ -21,9 +21,9 @@ public:
     static MacroTimelineLayer* create(Macro* macro);
 
     // Touch event handlers (public for modifier access)
-    bool onTouchBegan(CCTouch* touch, CCEvent* event);
-    void onTouchMoved(CCTouch* touch, CCEvent* event);
-    void onTouchEnded(CCTouch* touch, CCEvent* event);
+    bool ccTouchBegan(CCTouch* touch, CCEvent* event) override;
+    void ccTouchMoved(CCTouch* touch, CCEvent* event) override;
+    void ccTouchEnded(CCTouch* touch, CCEvent* event) override;
 
 private:
     bool setup(Macro* macro) override;
@@ -67,7 +67,7 @@ private:
         float eventHeight = 16.0f;
         int firstVisibleFrame = 0;
         int lastVisibleFrame = 160;
-        CCSize timelineSize = {650.0f, 390.0f};
+        CCSize timelineSize = {500.0f, 330.0f};
     } renderState;
 
     // Input state

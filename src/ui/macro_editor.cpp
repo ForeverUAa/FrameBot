@@ -7,37 +7,29 @@ MacroEditLayer* editLayer = nullptr;
 
 class $modify(FLAlertLayer) {
 
-    virtual bool ccTouchBegan(cocos2d::CCTouch * touch, cocos2d::CCEvent * event) {
-        if (!FLAlertLayer::ccTouchBegan(touch, event)) return false;
-        MacroEditLayer* layer = typeinfo_cast<MacroEditLayer*>(this);
+    bool ccTouchBegan(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
+        bool handled = FLAlertLayer::ccTouchBegan(touch, event);
+        auto* layer = typeinfo_cast<MacroEditLayer*>(this);
 
-        if (!layer) return true;
+        if (layer)
+            layer->updateHover(touch->getLocation());
 
-        layer->updateHover(touch->getLocation());
-
-        return true;
+        return handled;
     }
 
-    virtual void ccTouchMoved(cocos2d::CCTouch * touch, cocos2d::CCEvent * event) {
+    void ccTouchMoved(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
         FLAlertLayer::ccTouchMoved(touch, event);
-        MacroEditLayer* layer = typeinfo_cast<MacroEditLayer*>(this);
-
-        if (!layer) return;
-
-        layer->updateHover(touch->getLocation());
+        if (auto* layer = typeinfo_cast<MacroEditLayer*>(this))
+            layer->updateHover(touch->getLocation());
     }
 
-
-    virtual void ccTouchEnded(cocos2d::CCTouch * touch, cocos2d::CCEvent * event) {
+    void ccTouchEnded(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
         FLAlertLayer::ccTouchEnded(touch, event);
-        MacroEditLayer* layer = typeinfo_cast<MacroEditLayer*>(this);
-
-        if (!layer) return;
-
-        layer->selectInput(layer->hoveredInput);
-        layer->updateHover(touch->getLocation());
+        if (auto* layer = typeinfo_cast<MacroEditLayer*>(this)) {
+            layer->selectInput(layer->hoveredInput);
+            layer->updateHover(touch->getLocation());
+        }
     }
-
 };
 
 MacroEditLayer::~MacroEditLayer() {

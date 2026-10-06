@@ -1,6 +1,5 @@
 #include "macro_timeline_layer.hpp"
 
-#include <Geode/modify/FLAlertLayer.hpp>
 #include <limits>
 
 
@@ -1075,38 +1074,6 @@ namespace {
     };
 }
 
-// Touch handler for MacroTimelineLayer
-#ifdef GEODE_IS_WINDOWS
-class $modify(FLAlertLayer) {
-    bool ccTouchBegan(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
-        if (!FLAlertLayer::ccTouchBegan(touch, event)) return false;
-
-        MacroTimelineLayer* layer = typeinfo_cast<MacroTimelineLayer*>(this);
-        if (!layer) return true;
-
-        return layer->onTouchBegan(touch, event);
-    }
-
-    void ccTouchMoved(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
-        FLAlertLayer::ccTouchMoved(touch, event);
-
-        MacroTimelineLayer* layer = typeinfo_cast<MacroTimelineLayer*>(this);
-        if (!layer) return;
-
-        layer->onTouchMoved(touch, event);
-    }
-
-    void ccTouchEnded(cocos2d::CCTouch* touch, cocos2d::CCEvent* event) override {
-        FLAlertLayer::ccTouchEnded(touch, event);
-
-        MacroTimelineLayer* layer = typeinfo_cast<MacroTimelineLayer*>(this);
-        if (!layer) return;
-
-        layer->onTouchEnded(touch, event);
-    }
-};
-#endif
-
 MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     MacroTimelineLayer* ret = new MacroTimelineLayer();
 
@@ -1114,7 +1081,7 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     ret->timeline = std::make_unique<MacroTimeline>(macro);
     ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
 
-    if (ret->initAnchored(900, 600, macro, Utils::getTexture().c_str())) {
+    if (ret->initAnchored(760, 470, macro, Utils::getTexture().c_str())) {
         ret->autorelease();
         return ret;
     }
@@ -1154,86 +1121,86 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
 void MacroTimelineLayer::initToolbar() {
     toolbarMenu = CCMenu::create();
     toolbarMenu->setPosition({
-        this->getContentSize().width / 2.0f,
-        this->getContentSize().height - 40.0f
+        m_mainLayer->getContentSize().width / 2.0f,
+        m_mainLayer->getContentSize().height - 34.0f
     });
     toolbarMenu->setZOrder(100);
-    this->addChild(toolbarMenu);
+    m_mainLayer->addChild(toolbarMenu);
 
     auto addSpriteButton = [&](const char* frame, float x, SEL_MenuHandler cb) {
         auto* spr = CCSprite::createWithSpriteFrameName(frame);
         auto* btn = CCMenuItemSpriteExtra::create(spr, this, cb);
-        btn->setScale(0.52f);
+        btn->setScale(0.46f);
         btn->setPositionX(x);
         toolbarMenu->addChild(btn);
         return btn;
     };
 
     playBtn = addSpriteButton(
-        "GJ_timeIcon_001.png", -150.0f,
+        "GJ_timeIcon_001.png", -145.0f,
         menu_selector(MacroTimelineLayer::onPlayPressed)
     );
     pauseBtn = addSpriteButton(
-        "GJ_pauseBtn_001.png", -120.0f,
+        "GJ_pauseBtn_001.png", -117.0f,
         menu_selector(MacroTimelineLayer::onPausePressed)
     );
     stopBtn = addSpriteButton(
-        "GJ_deleteIcon_001.png", -90.0f,
+        "GJ_deleteIcon_001.png", -89.0f,
         menu_selector(MacroTimelineLayer::onStopPressed)
     );
     stepFrameBtn = addSpriteButton(
-        "GJ_arrow_02_001.png", -60.0f,
+        "GJ_arrow_02_001.png", -61.0f,
         menu_selector(MacroTimelineLayer::onStepFramePressed)
     );
-    cbfModeToggle = addSpriteButton(
-        "GJ_infoIcon_001.png", -20.0f,
-        menu_selector(MacroTimelineLayer::onCBFTogglePressed)
-    );
     zoomOutBtn = addSpriteButton(
-        "edit_leftBtn_001.png", 30.0f,
+        "edit_leftBtn_001.png", -25.0f,
         menu_selector(MacroTimelineLayer::onZoomOutPressed)
     );
     zoomInBtn = addSpriteButton(
-        "edit_rightBtn_001.png", 60.0f,
+        "edit_rightBtn_001.png", 3.0f,
         menu_selector(MacroTimelineLayer::onZoomInPressed)
     );
 
+    auto cbfLabel = CCLabelBMFont::create("CBF", "bigFont.fnt");
+    cbfLabel->setScale(0.30f);
+    cbfModeToggle = CCMenuItemSpriteExtra::create(cbfLabel, this, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
+    cbfModeToggle->setPositionX(45.0f);
+    toolbarMenu->addChild(cbfModeToggle);
+
     auto taskLabel = CCLabelBMFont::create("Tasks", "bigFont.fnt");
-    taskLabel->setScale(0.32f);
+    taskLabel->setScale(0.30f);
     auto* taskBtn = CCMenuItemLabel::create(
         taskLabel,
         this,
         menu_selector(MacroTimelineLayer::onTasksPressed)
     );
-    taskBtn->setPositionX(118.0f);
+    taskBtn->setPositionX(105.0f);
     taskBtn->setID("tasks");
     toolbarMenu->addChild(taskBtn);
 }
 
 void MacroTimelineLayer::initTimeline() {
-    // Main timeline area on the left.
     constexpr float left = 18.0f;
-    constexpr float bottom = 68.0f;
+    constexpr float bottom = 54.0f;
 
-    renderState.timelineSize = {650.0f, 390.0f};
-    renderState.rulerHeight = 32.0f;
-    renderState.trackHeight = 150.0f;
-    renderState.eventHeight = 20.0f;
+    renderState.timelineSize = {500.0f, 330.0f};
+    renderState.rulerHeight = 28.0f;
+    renderState.trackHeight = 135.0f;
+    renderState.eventHeight = 18.0f;
 
     timelineLayer = CCLayer::create();
     timelineLayer->setPosition({left, bottom});
     timelineLayer->setContentSize(renderState.timelineSize);
     timelineLayer->setZOrder(20);
-    this->addChild(timelineLayer);
+    m_mainLayer->addChild(timelineLayer);
 
-    auto* bg = CCScale9Sprite::create("GJ_square_02_001.png");
+    auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     bg->setContentSize(renderState.timelineSize);
     bg->setPosition(renderState.timelineSize / 2.0f);
-    bg->setColor({28, 28, 34});
+    bg->setColor({30, 30, 36});
     bg->setOpacity(235);
     timelineLayer->addChild(bg);
 
-    // Ruler and event area.
     rulerLayer = CCLayer::create();
     rulerLayer->setContentSize({
         renderState.timelineSize.width,
@@ -1242,7 +1209,6 @@ void MacroTimelineLayer::initTimeline() {
     timelineLayer->addChild(rulerLayer);
 
     eventsLayer = CCLayer::create();
-    eventsLayer->setPosition({0.0f, 0.0f});
     eventsLayer->setContentSize({
         renderState.timelineSize.width,
         renderState.timelineSize.height - renderState.rulerHeight
@@ -1254,69 +1220,67 @@ void MacroTimelineLayer::initTimeline() {
     cursorLayer->setZOrder(10);
     timelineLayer->addChild(cursorLayer);
 
-    // Track separators.
-    for (int i = 0; i < 3; ++i) {
-        auto* line = CCSprite::createWithSpriteFrameName("pixel.png");
-        if (!line)
-            line = CCSprite::create();
-
-        line->setScaleX(0.5f * renderState.timelineSize.width);
-        line->setScaleY(0.5f);
+    // Lane separators use a known xdBot texture instead of a standalone texture asset.
+    for (int i = 0; i <= 2; ++i) {
+        auto* line = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+        line->setContentSize({
+            renderState.timelineSize.width - 8.0f,
+            1.0f
+        });
         line->setPosition({
             renderState.timelineSize.width / 2.0f,
             renderState.rulerHeight + i * renderState.trackHeight
         });
-        line->setColor({75, 75, 85});
-        line->setOpacity(i == 0 ? 210 : 150);
+        line->setColor({72, 72, 82});
+        line->setOpacity(i == 0 ? 210 : 130);
         eventsLayer->addChild(line);
     }
 
     auto* p1 = CCLabelBMFont::create("P1", "chatFont.fnt");
-    p1->setScale(0.42f);
-    p1->setPosition({18.0f, renderState.rulerHeight + 58.0f});
+    p1->setScale(0.38f);
+    p1->setPosition({17.0f, renderState.rulerHeight + 60.0f});
     p1->setColor({210, 210, 220});
     eventsLayer->addChild(p1);
 
     auto* p2 = CCLabelBMFont::create("P2", "chatFont.fnt");
-    p2->setScale(0.42f);
+    p2->setScale(0.38f);
     p2->setPosition({
-        18.0f,
-        renderState.rulerHeight + renderState.trackHeight + 58.0f
+        17.0f,
+        renderState.rulerHeight + renderState.trackHeight + 60.0f
     });
     p2->setColor({210, 210, 220});
     eventsLayer->addChild(p2);
 
     frameCounterLabel = CCLabelBMFont::create("Frame: 0", "chatFont.fnt");
-    frameCounterLabel->setScale(0.42f);
+    frameCounterLabel->setScale(0.38f);
     frameCounterLabel->setAnchorPoint({0.0f, 0.5f});
-    frameCounterLabel->setPosition({left, bottom + renderState.timelineSize.height + 18.0f});
-    this->addChild(frameCounterLabel);
+    frameCounterLabel->setPosition({left, bottom + renderState.timelineSize.height + 15.0f});
+    m_mainLayer->addChild(frameCounterLabel);
 
     subframeLabel = CCLabelBMFont::create("Subframe: 0%", "chatFont.fnt");
-    subframeLabel->setScale(0.42f);
+    subframeLabel->setScale(0.38f);
     subframeLabel->setAnchorPoint({0.0f, 0.5f});
-    subframeLabel->setPosition({left + 95.0f, bottom + renderState.timelineSize.height + 18.0f});
-    this->addChild(subframeLabel);
+    subframeLabel->setPosition({left + 90.0f, bottom + renderState.timelineSize.height + 15.0f});
+    m_mainLayer->addChild(subframeLabel);
 }
 
 void MacroTimelineLayer::initInspector() {
-    constexpr float width = 205.0f;
-    constexpr float height = 390.0f;
+    constexpr float width = 200.0f;
+    constexpr float height = 330.0f;
+    constexpr float left = 542.0f;
+    constexpr float bottom = 54.0f;
 
-    inspectorBg = CCScale9Sprite::create("GJ_square_02_001.png");
+    inspectorBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     inspectorBg->setContentSize({width, height});
-    inspectorBg->setPosition({
-        this->getContentSize().width - width / 2.0f - 18.0f,
-        68.0f + height / 2.0f
-    });
-    inspectorBg->setColor({28, 28, 34});
+    inspectorBg->setPosition({left + width / 2.0f, bottom + height / 2.0f});
+    inspectorBg->setColor({30, 30, 36});
     inspectorBg->setOpacity(235);
     inspectorBg->setZOrder(25);
-    this->addChild(inspectorBg);
+    m_mainLayer->addChild(inspectorBg);
 
     auto* title = CCLabelBMFont::create("Event Inspector", "bigFont.fnt");
-    title->setScale(0.38f);
-    title->setPosition({width / 2.0f, height - 24.0f});
+    title->setScale(0.34f);
+    title->setPosition({width / 2.0f, height - 20.0f});
     inspectorBg->addChild(title);
 
     inspectorMenu = CCMenu::create();
@@ -1325,25 +1289,25 @@ void MacroTimelineLayer::initInspector() {
 
     auto addButton = [&](const char* text, float x, float y, SEL_MenuHandler cb) {
         auto* label = CCLabelBMFont::create(text, "bigFont.fnt");
-        label->setScale(0.31f);
+        label->setScale(0.29f);
         auto* item = CCMenuItemLabel::create(label, this, cb);
         item->setPosition({x, y});
         inspectorMenu->addChild(item);
     };
 
-    addButton("-", 26.0f, 260.0f, menu_selector(MacroTimelineLayer::onFrameDown));
-    addButton("+", 179.0f, 260.0f, menu_selector(MacroTimelineLayer::onFrameUp));
-    addButton("-", 26.0f, 228.0f, menu_selector(MacroTimelineLayer::onSubframeDown));
-    addButton("+", 179.0f, 228.0f, menu_selector(MacroTimelineLayer::onSubframeUp));
-    addButton("Button", 103.0f, 193.0f, menu_selector(MacroTimelineLayer::onButtonCycle));
-    addButton("Player", 55.0f, 163.0f, menu_selector(MacroTimelineLayer::onPlayerToggle));
-    addButton("Action", 151.0f, 163.0f, menu_selector(MacroTimelineLayer::onActionToggle));
+    addButton("-", 24.0f, 252.0f, menu_selector(MacroTimelineLayer::onFrameDown));
+    addButton("+", 176.0f, 252.0f, menu_selector(MacroTimelineLayer::onFrameUp));
+    addButton("-", 24.0f, 221.0f, menu_selector(MacroTimelineLayer::onSubframeDown));
+    addButton("+", 176.0f, 221.0f, menu_selector(MacroTimelineLayer::onSubframeUp));
+    addButton("Button", 100.0f, 187.0f, menu_selector(MacroTimelineLayer::onButtonCycle));
+    addButton("Player", 50.0f, 157.0f, menu_selector(MacroTimelineLayer::onPlayerToggle));
+    addButton("Action", 150.0f, 157.0f, menu_selector(MacroTimelineLayer::onActionToggle));
 
     for (int i = 0; i < 8; ++i) {
         inspectorLabels[i] = CCLabelBMFont::create("", "chatFont.fnt");
-        inspectorLabels[i]->setScale(0.31f);
+        inspectorLabels[i]->setScale(0.285f);
         inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
-        inspectorLabels[i]->setPosition({12.0f, 140.0f - i * 14.0f});
+        inspectorLabels[i]->setPosition({10.0f, 130.0f - i * 14.0f});
         inspectorBg->addChild(inspectorLabels[i]);
     }
 }
@@ -1383,23 +1347,29 @@ void MacroTimelineLayer::renderEvents() {
         // Keep the marker slightly wider than the visual frame so both presses
         // and releases remain easy to select, especially in CBF mode.
         const bool selected = timeline->isEventSelected(i);
-        CCScale9Sprite* eventBox = CCScale9Sprite::create("GJ_square_02_001.png");
-        eventBox->setScale(1.0f);
-        eventBox->setContentSize({10.0f, renderState.eventHeight});
+        auto* eventBox = CCDrawNode::create();
+        eventBox->drawRect(
+            {-4.0f, -renderState.eventHeight / 2.0f},
+            {4.0f, renderState.eventHeight / 2.0f},
+            ccc4f(
+                static_cast<float>(color.r) / 255.0f,
+                static_cast<float>(color.g) / 255.0f,
+                static_cast<float>(color.b) / 255.0f,
+                selected ? 1.0f : 0.72f
+            )
+        );
         eventBox->setPosition({x, y});
-        eventBox->setColor(color);
-        eventBox->setOpacity(selected ? 255 : 180);
         eventBox->setZOrder(selected ? 20 : 10);
         eventsLayer->addChild(eventBox);
 
         // Add button label (abbreviated)
         CCLabelBMFont* btnLabel = CCLabelBMFont::create(
-            std::to_string(evt.button).c_str(),
+            getButtonName(evt.button).c_str(),
             "chatFont.fnt"
         );
         btnLabel->setScale(0.25f);
         btnLabel->setPosition({x, y});
-        btnLabel->setColor({255, 255, 255});
+        btnLabel->setColor({235, 235, 235});
         btnLabel->setZOrder(selected ? 21 : 11);
         eventsLayer->addChild(btnLabel);
     }
@@ -1416,17 +1386,12 @@ void MacroTimelineLayer::renderRuler() {
 
         if (x < 0 || x > renderState.timelineSize.width) continue;
 
-        // Draw tick mark as small vertical line using sprite
-        CCSprite* tick = CCSprite::createWithSpriteFrameName("pixel.png");
-        if (!tick) {
-            // Fallback: create a 1x10 colored rectangle
-            tick = CCSprite::create();
-            tick->setScaleX(0.1f);
-            tick->setScaleY(2.0f);
-        }
-        tick->setPosition({x, 10});
-        tick->setColor({200, 200, 200});
-        tick->setOpacity(180);
+        auto* tick = CCDrawNode::create();
+        tick->drawRect(
+            {x - 0.5f, 4.0f},
+            {x + 0.5f, 18.0f},
+            ccc4f(0.78f, 0.78f, 0.78f, 0.75f)
+        );
         rulerLayer->addChild(tick);
 
         // Draw label
@@ -1448,16 +1413,12 @@ void MacroTimelineLayer::renderPlayhead() {
     float x = frameToPixels(timeline->getPlayheadFrame(), timeline->getPlayheadSubframe());
 
     if (x >= 0 && x <= renderState.timelineSize.width) {
-        // Create a vertical line representing the playhead
-        CCSprite* cursor = CCSprite::createWithSpriteFrameName("pixel.png");
-        if (!cursor) {
-            cursor = CCSprite::create();
-            cursor->setScaleX(0.5f);
-            cursor->setScaleY(10.0f);
-        }
-        cursor->setPosition({x, renderState.timelineSize.height / 2});
-        cursor->setColor({255, 100, 100});
-        cursor->setOpacity(220);
+        auto* cursor = CCDrawNode::create();
+        cursor->drawRect(
+            {x - 0.75f, 0.0f},
+            {x + 0.75f, renderState.timelineSize.height},
+            ccc4f(1.0f, 0.35f, 0.35f, 0.8f)
+        );
         cursor->setZOrder(100);
         cursorLayer->addChild(cursor);
     }
@@ -1527,10 +1488,11 @@ void MacroTimelineLayer::onZoomOutPressed(CCObject*) {
 }
 
 // Input handling
-bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent*) {
+bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
+    if (!FLAlertLayer::ccTouchBegan(touch, event)) return false;
     if (!timeline) return false;
 
-    const CCPoint layerPos = this->convertToNodeSpace(touch->getLocation());
+    const CCPoint layerPos = m_mainLayer->convertToNodeSpace(touch->getLocation());
     const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
     int eventIdx = hitTestEvent(eventPos);
     if (eventIdx >= 0) {
@@ -1555,7 +1517,8 @@ bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent*) {
     return false;
 }
 
-void MacroTimelineLayer::onTouchMoved(CCTouch* touch, CCEvent*) {
+void MacroTimelineLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
+    FLAlertLayer::ccTouchMoved(touch, event);
     if (!inputState.isDragging || inputState.draggedEventIdx < 0) return;
 
     const CCPoint pos = eventsLayer->convertToNodeSpace(touch->getLocation());
@@ -1567,7 +1530,8 @@ void MacroTimelineLayer::onTouchMoved(CCTouch* touch, CCEvent*) {
         timeline->setEventSubframe(inputState.draggedEventIdx, precise - std::floor(precise));
 }
 
-void MacroTimelineLayer::onTouchEnded(CCTouch*, CCEvent*) {
+void MacroTimelineLayer::ccTouchEnded(CCTouch* touch, CCEvent* event) {
+    FLAlertLayer::ccTouchEnded(touch, event);
     inputState.isDragging = false;
     inputState.draggedEventIdx = -1;
 }
