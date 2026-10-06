@@ -1,6 +1,473 @@
 #include "macro_timeline_layer.hpp"
 
 #include <Geode/modify/FLAlertLayer.hpp>
+#include <limits>
+
+
+namespace {
+    struct FrameTaskResult {
+        int frame = 0;
+        double subframe = 0.0;
+        bool passed = false;
+        cocos2d::CCPoint position = {0, 0};
+    };
+
+    struct FrameTask {
+        int frame = 0;
+        double subframe = 0.0;
+        int button = 1;
+        bool player2 = false;
+        bool down = true;
+        std::vector<FrameTaskResult> results;
+        bool finished = false;
+    };
+
+    class FrameTaskPopup final : public geode::Popup<> {
+    public:
+        static FrameTaskPopup* create(MacroTimeline* timeline) {
+            auto ret = new FrameTaskPopup();
+            ret->m_timeline = timeline;
+            if (ret->initAnchored(520, 400, Utils::getTexture().c_str())) {
+                ret->autorelease();
+                return ret;
+            }
+            delete ret;
+            return nullptr;
+        }
+
+    protected:
+        bool setup() override {
+            if (!Popup::setup())
+                return false;
+
+            this->setTitle("Frame Tasks");
+
+            m_list = CCMenu::create();
+            m_list->setPosition({0, 0});
+            m_mainLayer->addChild(m_list);
+
+            auto addLabel = [&](const char* text, float x, float y, SEL_MenuHandler callback) {
+                auto label = CCLabelBMFont::create(text, "bigFont.fnt");
+                label->setScale(0.42f);
+                auto item = CCMenuItemLabel::create(label, this, callback);
+                item->setPosition({x, y});
+                m_list->addChild(item);
+            };
+
+            addLabel("Add Selected", 90, 32, menu_selector(FrameTaskPopup::onAddSelected));
+            addLabel("Start All", 260, 32, menu_selector(FrameTaskPopup::onStartAll));
+
+            m_status = CCLabelBMFont::create("No tasks", "chatFont.fnt");
+            m_status->setScale(0.42f);
+            m_status->setPosition({260, 65});
+            m_mainLayer->addChild(m_status);
+
+            this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
+            refreshList();
+            return true;
+        }
+
+        void onClose(CCObject* sender) override {
+            stopTesting(true);
+            Popup::onClose(sender);
+        }
+
+        void onAddSelected(CCObject*) {
+            if (!m_timeline)
+                return;
+
+            int index = m_timeline->getSelectedEventIndex();
+            const input* event = m_timeline->getEvent(index);
+            if (!event)
+                return;
+
+            FrameTask task;
+            task.frame = event->frame;
+            task.subframe = event->subframe;
+            task.button = event->button;
+            task.player2 = event->player2;
+            task.down = event->down;
+            s_tasks.push_back(task);
+
+            refreshList();
+            m_status->setString(fmt::format("Added task at {}", formatTime(task.frame, task.subframe)).c_str());
+        }
+
+        void onStartTask(CCObject* sender) {
+            auto item = static_cast<CCNode*>(sender);
+            int index = item->getTag();
+            if (index >= 0 && index < static_cast<int>(s_tasks.size()))
+                startTesting(index, false);
+        }
+
+        void onStartAll(CCObject*) {
+            if (s_tasks.empty())
+                return;
+
+            startTesting(0, true);
+        }
+
+        void refreshList() {
+            if (!m_list)
+                return;
+
+            m_list->removeAllChildren();
+
+            float y = 350.0f;
+            for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
+                auto& task = s_tasks[i];
+
+                int successful = 0;
+                for (const auto& result : task.results)
+                    successful += result.passed ? 1 : 0;
+
+                std::string resultText = task.finished
+                    ? fmt::format("  {} window{}", successful, successful == 1 ? "" : "s")
+                    : "";
+
+                auto text = CCLabelBMFont::create(
+                    fmt::format("{}: {}{}", i + 1, formatTime(task.frame, task.subframe), resultText).c_str(),
+                    "chatFont.fnt"
+                );
+                text->setScale(0.38f);
+                text->setAnchorPoint({0, 0.5f});
+                text->setPosition({45, y});
+
+                auto item = CCMenuItemLabel::create(text, this, menu_selector(FrameTaskPopup::onStartTask));
+                item->setTag(i);
+                item->setPosition({250, y});
+                m_list->addChild(item);
+
+                y -= 28.0f;
+                if (y < 90.0f)
+                    break;
+            }
+        }
+
+        static std::string formatTime(int frame, double subframe) {
+            if (std::abs(subframe) < 0.0001)
+                return std::to_string(frame);
+
+            return fmt::format("{}.{:02d}", frame, static_cast<int>(std::round(subframe * 100.0)));
+        }
+
+        void buildCandidates(const FrameTask& task) {
+            m_candidates.clear();
+
+            // Probe a symmetric frame window first.
+            for (int offset = -8; offset <= 8; ++offset)
+                m_candidates.push_back({std::max(0, task.frame + offset), 0.0});
+
+            // If the task itself contains subframe timing, probe between-frame
+            // positions as well. This intentionally adds more tests rather
+            // than collapsing them to the nearest whole frame.
+            if (task.subframe > 0.0001) {
+                for (int offset = -2; offset <= 2; ++offset) {
+                    for (int step = 1; step < 10; ++step)
+                        m_candidates.push_back({
+                            std::max(0, task.frame + offset),
+                            step / 10.0
+                        });
+                }
+            }
+        }
+
+        int findTaskEvent(const Macro& macro, const FrameTask& task) const {
+            int best = -1;
+            double bestDistance = std::numeric_limits<double>::max();
+
+            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
+                const auto& event = macro.inputs[i];
+                if (event.button != task.button ||
+                    event.player2 != task.player2 ||
+                    event.down != task.down)
+                    continue;
+
+                double distance = std::abs(event.getPreciseFrame() -
+                    (task.frame + task.subframe));
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        void startTesting(int taskIndex, bool all) {
+            if (m_testing || taskIndex < 0 || taskIndex >= static_cast<int>(s_tasks.size()))
+                return;
+
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl || !m_timeline)
+                return;
+
+            m_backupMacro = Global::get().macro;
+            m_backupState = Global::get().state;
+            m_backupCurrentAction = Global::get().currentAction;
+            m_backupCurrentFrameFix = Global::get().currentFrameFix;
+            m_backupRestart = Global::get().restart;
+            m_backupFirstAttempt = Global::get().firstAttempt;
+            m_taskIndex = taskIndex;
+            m_testingAll = all;
+            m_testing = true;
+
+            if (m_testingAll) {
+                for (auto& task : s_tasks)
+                    task.finished = false;
+            } else {
+                s_tasks[m_taskIndex].finished = false;
+            }
+
+            s_tasks[m_taskIndex].results.clear();
+            buildCandidates(s_tasks[m_taskIndex]);
+            m_candidateIndex = 0;
+            m_targetSeen = false;
+            m_attemptStartFrame = 0;
+
+            beginCandidate();
+        }
+
+        void beginCandidate() {
+            if (!m_testing)
+                return;
+
+            if (m_taskIndex < 0 || m_taskIndex >= static_cast<int>(s_tasks.size())) {
+                finishTesting();
+                return;
+            }
+
+            if (m_candidateIndex >= static_cast<int>(m_candidates.size())) {
+                s_tasks[m_taskIndex].finished = true;
+
+                if (m_testingAll && m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
+                    ++m_taskIndex;
+                    s_tasks[m_taskIndex].results.clear();
+                    buildCandidates(s_tasks[m_taskIndex]);
+                    m_candidateIndex = 0;
+                    beginCandidate();
+                    return;
+                }
+
+                finishTesting();
+                return;
+            }
+
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl) {
+                finishTesting();
+                return;
+            }
+
+            auto& task = s_tasks[m_taskIndex];
+            auto candidate = m_candidates[m_candidateIndex];
+
+            Macro candidateMacro = m_backupMacro;
+            int eventIndex = findTaskEvent(candidateMacro, task);
+            if (eventIndex < 0) {
+                ++m_candidateIndex;
+                beginCandidate();
+                return;
+            }
+
+            candidateMacro.inputs[eventIndex].frame = candidate.first;
+            candidateMacro.inputs[eventIndex].subframe = candidate.second;
+            std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
+
+            auto& g = Global::get();
+            g.macro = candidateMacro;
+            g.state = state::playing;
+            g.currentAction = 0;
+            g.currentFrameFix = 0;
+            g.restart = true;
+            g.firstAttempt = true;
+            g.respawnFrame = -1;
+
+            m_targetFrame = candidate.first;
+            m_targetSubframe = candidate.second;
+            m_targetSeen = false;
+            m_attemptStartFrame = 0;
+
+            pl->resetLevelFromStart();
+
+            m_status->setString(
+                fmt::format(
+                    "Testing {} / {}: {}",
+                    m_candidateIndex + 1,
+                    m_candidates.size(),
+                    formatTime(m_targetFrame, m_targetSubframe)
+                ).c_str()
+            );
+        }
+
+        void updateTaskRunner(float) {
+            if (!m_testing)
+                return;
+
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl)
+                return finishTesting();
+
+            int frame = Global::getCurrentFrame();
+
+            if (m_attemptStartFrame == 0 && frame > 0)
+                m_attemptStartFrame = frame;
+
+            if (!m_targetSeen && frame >= m_targetFrame) {
+                PlayerObject* player = s_tasks[m_taskIndex].player2 ? pl->m_player2 : pl->m_player1;
+                if (player) {
+                    m_targetPosition = player->getPosition();
+                    m_targetSeen = true;
+                }
+            }
+
+            if (pl->m_player1 && pl->m_player1->m_isDead) {
+                recordResult(false);
+                return;
+            }
+
+            if (pl->m_levelEndAnimationStarted) {
+                recordResult(true);
+                return;
+            }
+
+            // Surviving a lookahead after the tested input is the pass
+            // criterion. This prevents an input from being called valid just
+            // because it did not kill the player on the exact tested frame.
+            if (m_targetSeen && frame >= m_targetFrame + 12)
+                recordResult(true);
+        }
+
+        void recordResult(bool passed) {
+            if (!m_testing)
+                return;
+
+            auto& task = s_tasks[m_taskIndex];
+
+            FrameTaskResult result;
+            result.frame = m_targetFrame;
+            result.subframe = m_targetSubframe;
+            result.passed = passed;
+            result.position = m_targetPosition;
+            task.results.push_back(result);
+
+            if (passed)
+                addMarker(result);
+
+            ++m_candidateIndex;
+            beginCandidate();
+        }
+
+        void addMarker(const FrameTaskResult& result) {
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl)
+                return;
+
+            constexpr int markerTag = 0xF7A5;
+
+            auto* markerLayer = pl->getChildByTag(markerTag);
+            if (!markerLayer) {
+                markerLayer = CCLayer::create();
+                markerLayer->setTag(markerTag);
+                markerLayer->setZOrder(100000);
+                pl->addChild(markerLayer);
+            }
+
+            auto* draw = CCDrawNode::create();
+            draw->drawCircle(
+                result.position,
+                10.0f,
+                ccc4f(0.1f, 1.0f, 0.2f, 0.85f),
+                1.5f,
+                ccc4f(0.1f, 1.0f, 0.2f, 0.95f),
+                24
+            );
+            markerLayer->addChild(draw);
+
+            auto label = CCLabelBMFont::create(
+                formatTime(result.frame, result.subframe).c_str(),
+                "chatFont.fnt"
+            );
+            label->setScale(0.3f);
+            label->setAnchorPoint({0.5f, 0.0f});
+            label->setPosition({result.position.x, result.position.y + 11.0f});
+            markerLayer->addChild(label);
+        }
+
+        void finishTesting() {
+            if (!m_testing)
+                return;
+
+            auto& g = Global::get();
+            g.macro = m_backupMacro;
+            g.state = m_backupState;
+            g.currentAction = m_backupCurrentAction;
+            g.currentFrameFix = m_backupCurrentFrameFix;
+            g.restart = m_backupRestart;
+            g.firstAttempt = m_backupFirstAttempt;
+
+            m_testing = false;
+
+            if (m_testingAll) {
+                for (auto& task : s_tasks)
+                    task.finished = true;
+            } else if (m_taskIndex >= 0 && m_taskIndex < static_cast<int>(s_tasks.size())) {
+                s_tasks[m_taskIndex].finished = true;
+            }
+
+            Macro::updateTPS();
+            Interface::updateLabels();
+            Interface::updateButtons();
+
+            refreshList();
+
+            int total = 0;
+            for (const auto& task : s_tasks)
+                for (const auto& result : task.results)
+                    total += result.passed ? 1 : 0;
+
+            m_status->setString(
+                fmt::format("Finished: {} successful timings", total).c_str()
+            );
+        }
+
+        void stopTesting(bool restore) {
+            if (!m_testing)
+                return;
+
+            if (restore)
+                finishTesting();
+            else
+                m_testing = false;
+        }
+
+    private:
+        MacroTimeline* m_timeline = nullptr;
+        CCMenu* m_list = nullptr;
+        CCLabelBMFont* m_status = nullptr;
+
+        bool m_testing = false;
+        bool m_testingAll = false;
+        int m_taskIndex = -1;
+        int m_candidateIndex = 0;
+        int m_targetFrame = 0;
+        double m_targetSubframe = 0.0;
+        int m_attemptStartFrame = 0;
+        bool m_targetSeen = false;
+        CCPoint m_targetPosition = {0, 0};
+
+        Macro m_backupMacro;
+        state m_backupState = state::none;
+        size_t m_backupCurrentAction = 0;
+        size_t m_backupCurrentFrameFix = 0;
+        bool m_backupRestart = false;
+        bool m_backupFirstAttempt = false;
+
+        std::vector<std::pair<int, double>> m_candidates;
+
+        static inline std::vector<FrameTask> s_tasks;
+    };
+}
 
 // Touch handler for MacroTimelineLayer
 #ifdef GEODE_IS_WINDOWS
@@ -115,6 +582,20 @@ void MacroTimelineLayer::initToolbar() {
     cbfModeToggle->setPositionX(130);
     cbfModeToggle->setTag(4);
     toolbarMenu->addChild(cbfModeToggle);
+
+    // Tasks menu
+    auto taskLabel = CCLabelBMFont::create("Tasks", "bigFont.fnt");
+    taskLabel->setScale(0.35f);
+    auto taskBtn = CCMenuItemLabel::create(
+        taskLabel,
+        [this](CCObject*) {
+            auto popup = FrameTaskPopup::create(timeline.get());
+            if (popup) popup->show();
+        }
+    );
+    taskBtn->setPositionX(240);
+    taskBtn->setTag(7);
+    toolbarMenu->addChild(taskBtn);
 
     // Zoom buttons
     spr = CCSprite::createWithSpriteFrameName("edit_rightBtn_001.png");
