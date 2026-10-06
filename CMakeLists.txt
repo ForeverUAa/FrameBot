@@ -23,6 +23,7 @@ add_library(${PROJECT_NAME} SHARED
     src/hacks/coin_finder.cpp
     src/hacks/clickbot.cpp
     src/hacks/autoclicker.cpp
+    src/hacks/cbf.cpp
 
     src/ui/macro_editor.cpp
     src/ui/button_edit_layer.cpp

@@ -1,4 +1,5 @@
 #include "includes.hpp"
+#include "hacks/cbf.hpp"
 
 #include "ui/record_layer.hpp"
 #include "practice_fixes/practice_fixes.hpp"
@@ -233,6 +234,9 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
     }
 
+    if (g.state == state::playing)
+      cbf::Engine::get()->prepare(Global::getCurrentFrame(), g.macro, g.currentAction);
+
     GJBaseGameLayer::processCommands(dt);
 
     if (g.state == state::none)
@@ -325,6 +329,12 @@ class $modify(BGLHook, GJBaseGameLayer) {
     while (g.currentAction < g.macro.inputs.size() && frame >= g.macro.inputs[g.currentAction].frame) {
       auto input = g.macro.inputs[g.currentAction];
 
+      if (cbf::Engine::get()->consumeFired(g.currentAction)) {
+        g.currentAction++;
+        g.safeMode = true;
+        continue;
+      }
+
       if (frame != g.respawnFrame) {
         if (Macro::flipControls())
           input.player2 = !input.player2;
@@ -337,6 +347,8 @@ class $modify(BGLHook, GJBaseGameLayer) {
     }
 
     g.respawnFrame = -1;
+    cbf::Engine::get()->clearArmed();
+    cbf::Engine::get()->clearFired();
     m_fields->macroInput = false;
 
     if (g.currentAction == g.macro.inputs.size()) {
@@ -389,6 +401,9 @@ class $modify(BGLHook, GJBaseGameLayer) {
       return GJBaseGameLayer::handleButton(hold, button, player2);
 
     if (g.state == state::playing) {
+      if (cbf::Engine::get()->m_midStep)
+        return GJBaseGameLayer::handleButton(hold, button, player2);
+
       if (g.mod->getSavedValue<bool>("macro_ignore_inputs") && !m_fields->macroInput)
         return;
       else return GJBaseGameLayer::handleButton(hold, button, player2);

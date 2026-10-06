@@ -1,4 +1,5 @@
 #include "includes.hpp"
+#include "hacks/cbf.hpp"
 #include "ui/record_layer.hpp"
 #include "ui/game_ui.hpp"
 
@@ -292,6 +293,8 @@ void Macro::resetVariables() {
 
 void Macro::resetState(bool cp) {
     auto& g = Global::get();
+
+    cbf::Engine::get()->reset();
 
     g.restart = false;
     g.state = state::none;
