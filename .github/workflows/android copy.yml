@@ -28,7 +28,7 @@ jobs:
         with:
           bindings: geode-sdk/bindings
           build-config: Release
-          bindings-ref: main
+          bindings-ref: 2a8b5c489ce8b49e7061b0543aa2bc5b22570063
           combine: true
           target: ${{ matrix.config.target }}
 
