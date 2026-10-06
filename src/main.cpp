@@ -234,7 +234,7 @@ class $modify(BGLHook, GJBaseGameLayer) {
     if (g.state == state::playing)
       cbf::Engine::get()->prepare(Global::getCurrentFrame(), g.macro, g.currentAction);
 
-    GJBaseGameLayer::processCommands(dt);
+    GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 
     if (g.state == state::none)
       return;
