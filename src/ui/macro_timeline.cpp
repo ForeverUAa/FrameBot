@@ -200,3 +200,29 @@ bool MacroTimeline::canUndo() const {
 bool MacroTimeline::canRedo() const {
     return historyIndex >= 0 && historyIndex < (int)history.size() - 1;
 }
+
+
+void MacroTimeline::setSelectedEventFrame(int frame) {
+    if (state.selectedEventIndex < 0) return;
+    setEventFrame(state.selectedEventIndex, std::max(0, frame));
+}
+
+void MacroTimeline::setSelectedEventSubframe(double subframe) {
+    if (state.selectedEventIndex < 0) return;
+    setEventSubframe(state.selectedEventIndex, subframe);
+}
+
+void MacroTimeline::setSelectedEventButton(int button) {
+    if (state.selectedEventIndex < 0) return;
+    setEventButton(state.selectedEventIndex, std::max(1, button));
+}
+
+void MacroTimeline::setSelectedEventPlayer(bool player2) {
+    if (state.selectedEventIndex < 0) return;
+    setEventPlayer(state.selectedEventIndex, player2);
+}
+
+void MacroTimeline::setSelectedEventAction(bool pressed) {
+    if (state.selectedEventIndex < 0) return;
+    setEventAction(state.selectedEventIndex, pressed);
+}
