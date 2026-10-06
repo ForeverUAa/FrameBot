@@ -3,9 +3,6 @@
 
 #include <Geode/modify/CCTextInputNode.hpp>
 
-#ifdef GEODE_IS_WINDOWS
-#include <geode.custom-keybinds/include/Keybinds.hpp>
-#endif
 
 #include <random>
 
@@ -185,26 +182,6 @@ int Global::getCurrentFrame(bool editor) {
   return frame;
 }
 
-void Global::updateKeybinds() {
-#ifdef GEODE_IS_WINDOWS
-
-  auto& g = Global::get();
-  for (size_t i = 0; i < 6; i++) {
-    auto keys = keybinds::BindManager::get()->getBindsFor(buttonIDs[i]);
-    std::vector<int> keysInts = {};
-
-    for (size_t j = 0; j < keys.size(); j++) {
-      keysInts.push_back(keys[j]->getHash());
-      g.allKeybinds.insert(keys[j]->getHash());
-    }
-
-    g.keybinds[i].clear();
-    for (int k = 0; k < keysInts.size(); k++)
-      g.keybinds[i].push_back(keysInts[k]);
-  }
-#endif
-}
-
 void Global::updateSeed(bool isRestart) {
 
   auto& g = Global::get();
@@ -334,9 +311,7 @@ void Global::frameStepperOff() {
 }
 
 PauseLayer* Global::getPauseLayer() {
-  CCArray* children = CCDirector::sharedDirector()->getRunningScene()->getChildren();
-  CCObject* child;
-  CCARRAY_FOREACH(children, child) {
+  for (CCNode* child : CCDirector::sharedDirector()->getRunningScene()->getChildrenExt()) {
     if (PauseLayer* pauseLayer = typeinfo_cast<PauseLayer*>(child))
       return pauseLayer;
   }

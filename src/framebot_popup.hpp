@@ -3,6 +3,7 @@
 #include <Geode/ui/Popup.hpp>
 
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace framebot {
@@ -32,24 +33,23 @@ public:
 
             return setup();
         }
-        else if constexpr (count == 2) {
-            if constexpr (
-                std::is_convertible_v<std::tuple_element_t<0, decltype(tuple)>, char const*> &&
-                std::is_same_v<std::remove_cvref_t<std::tuple_element_t<1, decltype(tuple)>>,
-                               cocos2d::CCRect>
-            ) {
-                if (!geode::Popup::init(width, height, std::get<0>(tuple), std::get<1>(tuple)))
-                    return false;
+        else if constexpr (
+            count == 2 &&
+            std::is_convertible_v<std::tuple_element_t<0, decltype(tuple)>, char const*> &&
+            std::is_same_v<std::remove_cvref_t<std::tuple_element_t<1, decltype(tuple)>>, cocos2d::CCRect>
+        ) {
+            if (!geode::Popup::init(width, height, std::get<0>(tuple), std::get<1>(tuple)))
+                return false;
 
-                return setup();
-            }
+            return setup();
         }
+        else {
+            constexpr std::size_t argCount = count - 1;
+            if (!geode::Popup::init(width, height, std::get<argCount>(tuple)))
+                return false;
 
-        constexpr std::size_t argCount = count - 1;
-        if (!geode::Popup::init(width, height, std::get<argCount>(tuple)))
-            return false;
-
-        return callSetup(tuple, std::make_index_sequence<argCount>{});
+            return callSetup(tuple, std::make_index_sequence<argCount>{});
+        }
     }
 };
 

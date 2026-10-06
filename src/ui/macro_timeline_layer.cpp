@@ -53,9 +53,6 @@ namespace {
 
     protected:
         bool setup() override {
-            if (!Popup::setup())
-                return false;
-
             this->setTitle("Frame Tasks");
 
             m_list = CCMenu::create();
