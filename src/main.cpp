@@ -317,6 +317,7 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
   void handlePlaying(int frame) {
     auto& g = Global::get();
+    bool const cbfEnabled = g.mod->getSettingValue<bool>("cbf");
     if (m_levelEndAnimationStarted) return;
 
     if (m_player1->m_isDead) {
