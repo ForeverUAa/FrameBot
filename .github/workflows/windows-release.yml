@@ -31,7 +31,7 @@ jobs:
           target: Win64
           build-config: Release
           bindings: geode-sdk/bindings
-          bindings-ref: main
+          bindings-ref: 82c073b4e163eb7d98ad9a48e410e8c39f720833
           export-pdb: false
 
       - name: Upload .geode to release
