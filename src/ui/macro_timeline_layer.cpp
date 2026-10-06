@@ -504,7 +504,7 @@ ccColor3B MacroTimelineLayer::getPlayerColor(bool player2) const {
 }
 
 ccColor3B MacroTimelineLayer::getActionColor(bool pressed) const {
-    return pressed ? ccc3(100, 255, 100) : ccc3(255, 150, 100);
+    return pressed ? ccc3(100, 255, 100) : ccc3(255, 100, 100);
 }
 
 void MacroTimelineLayer::jumpToEvent(int eventIndex) {
