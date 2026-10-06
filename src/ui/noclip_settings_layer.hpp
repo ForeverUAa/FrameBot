@@ -1,6 +1,6 @@
 #include "../includes.hpp"
 
-class NoclipSettingsLayer : public geode::Popup<> {
+class NoclipSettingsLayer : public framebot::Popup<> {
 
 private:
 	

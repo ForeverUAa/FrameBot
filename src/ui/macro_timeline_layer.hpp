@@ -16,7 +16,7 @@
  * - Zoom and scroll controls
  */
 
-class MacroTimelineLayer : public geode::Popup<Macro*> {
+class MacroTimelineLayer : public framebot::Popup<Macro*> {
 public:
     static MacroTimelineLayer* create(Macro* macro);
 

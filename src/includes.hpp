@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Geode/Geode.hpp>
+#include "framebot_popup.hpp"
 // #include <Geode/loader/SettingEvent.hpp>
 
 #include <string>
@@ -79,7 +80,7 @@ public:
     static PauseLayer* getPauseLayer();
 
     Mod* mod = Mod::get();
-    geode::Popup<>* layer = nullptr;
+    framebot::Popup<>* layer = nullptr;
 
     Macro macro;
     Renderer renderer;

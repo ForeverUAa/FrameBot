@@ -38,7 +38,7 @@ namespace {
         bool finished = false;
     };
 
-    class FrameTaskPopup final : public geode::Popup<> {
+    class FrameTaskPopup final : public framebot::Popup<> {
     public:
         static FrameTaskPopup* create(MacroTimeline* timeline) {
             auto ret = new FrameTaskPopup();

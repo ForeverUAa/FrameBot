@@ -2,7 +2,7 @@
 
 #include "../includes.hpp"
 
-class RenderSettingsLayer : public geode::Popup<>, public TextInputDelegate {
+class RenderSettingsLayer : public framebot::Popup<>, public TextInputDelegate {
 	
 public:
 
