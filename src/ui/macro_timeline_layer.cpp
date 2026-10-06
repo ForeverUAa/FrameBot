@@ -1183,7 +1183,7 @@ void MacroTimelineLayer::initTimeline() {
     constexpr float left = 18.0f;
     constexpr float bottom = 54.0f;
 
-    renderState.timelineSize = {500.0f, 330.0f};
+    renderState.timelineSize = CCSizeMake(500.0f, 330.0f);
     renderState.rulerHeight = 28.0f;
     renderState.trackHeight = 135.0f;
     renderState.eventHeight = 18.0f;
@@ -1220,19 +1220,20 @@ void MacroTimelineLayer::initTimeline() {
     cursorLayer->setZOrder(10);
     timelineLayer->addChild(cursorLayer);
 
-    // Lane separators use a known xdBot texture instead of a standalone texture asset.
     for (int i = 0; i <= 2; ++i) {
-        auto* line = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
-        line->setContentSize({
-            renderState.timelineSize.width - 8.0f,
-            1.0f
-        });
-        line->setPosition({
-            renderState.timelineSize.width / 2.0f,
-            renderState.rulerHeight + i * renderState.trackHeight
-        });
-        line->setColor({72, 72, 82});
-        line->setOpacity(i == 0 ? 210 : 130);
+        auto* line = CCDrawNode::create();
+        float y = renderState.rulerHeight + i * renderState.trackHeight;
+        line->drawRect(
+            CCRectMake(
+                4.0f,
+                y,
+                renderState.timelineSize.width - 8.0f,
+                1.0f
+            ),
+            ccc4f(0.28f, 0.28f, 0.32f, i == 0 ? 0.82f : 0.50f),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+        );
         eventsLayer->addChild(line);
     }
 
@@ -1329,6 +1330,35 @@ void MacroTimelineLayer::updateTimeline(float dt) {
 void MacroTimelineLayer::renderEvents() {
     eventsLayer->removeAllChildren();
 
+    for (int i = 0; i <= 2; ++i) {
+        auto* line = CCDrawNode::create();
+        float y = renderState.rulerHeight + i * renderState.trackHeight;
+        line->drawRect(
+            CCRectMake(
+                4.0f,
+                y,
+                renderState.timelineSize.width - 8.0f,
+                1.0f
+            ),
+            ccc4f(0.28f, 0.28f, 0.32f, i == 0 ? 0.82f : 0.50f),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+        );
+        eventsLayer->addChild(line);
+    }
+
+    auto* p1 = CCLabelBMFont::create("P1", "chatFont.fnt");
+    p1->setScale(0.38f);
+    p1->setPosition({17.0f, renderState.rulerHeight + 60.0f});
+    p1->setColor({210, 210, 220});
+    eventsLayer->addChild(p1);
+
+    auto* p2 = CCLabelBMFont::create("P2", "chatFont.fnt");
+    p2->setScale(0.38f);
+    p2->setPosition({17.0f, renderState.rulerHeight + renderState.trackHeight + 60.0f});
+    p2->setColor({210, 210, 220});
+    eventsLayer->addChild(p2);
+
     if (!macro || macro->inputs.empty()) return;
 
     const float p1Y = renderState.rulerHeight + renderState.trackHeight * 0.5f;
@@ -1349,16 +1379,22 @@ void MacroTimelineLayer::renderEvents() {
         const bool selected = timeline->isEventSelected(i);
         auto* eventBox = CCDrawNode::create();
         eventBox->drawRect(
-            {-4.0f, -renderState.eventHeight / 2.0f},
-            {4.0f, renderState.eventHeight / 2.0f},
+            CCRectMake(
+                -4.0f,
+                -renderState.eventHeight / 2.0f,
+                8.0f,
+                renderState.eventHeight
+            ),
             ccc4f(
                 static_cast<float>(color.r) / 255.0f,
                 static_cast<float>(color.g) / 255.0f,
                 static_cast<float>(color.b) / 255.0f,
                 selected ? 1.0f : 0.72f
-            )
+            ),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
-        eventBox->setPosition({x, y});
+        eventBox->setPosition(ccp(x, static_cast<float>(y)));
         eventBox->setZOrder(selected ? 20 : 10);
         eventsLayer->addChild(eventBox);
 
@@ -1368,7 +1404,7 @@ void MacroTimelineLayer::renderEvents() {
             "chatFont.fnt"
         );
         btnLabel->setScale(0.25f);
-        btnLabel->setPosition({x, y});
+        btnLabel->setPosition(ccp(x, y));
         btnLabel->setColor({235, 235, 235});
         btnLabel->setZOrder(selected ? 21 : 11);
         eventsLayer->addChild(btnLabel);
@@ -1388,9 +1424,10 @@ void MacroTimelineLayer::renderRuler() {
 
         auto* tick = CCDrawNode::create();
         tick->drawRect(
-            {x - 0.5f, 4.0f},
-            {x + 0.5f, 18.0f},
-            ccc4f(0.78f, 0.78f, 0.78f, 0.75f)
+            CCRectMake(x - 0.5f, 4.0f, 1.0f, 14.0f),
+            ccc4f(0.78f, 0.78f, 0.78f, 0.75f),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
         rulerLayer->addChild(tick);
 
@@ -1415,9 +1452,15 @@ void MacroTimelineLayer::renderPlayhead() {
     if (x >= 0 && x <= renderState.timelineSize.width) {
         auto* cursor = CCDrawNode::create();
         cursor->drawRect(
-            {x - 0.75f, 0.0f},
-            {x + 0.75f, renderState.timelineSize.height},
-            ccc4f(1.0f, 0.35f, 0.35f, 0.8f)
+            CCRectMake(
+                x - 0.75f,
+                0.0f,
+                1.5f,
+                renderState.timelineSize.height
+            ),
+            ccc4f(1.0f, 0.35f, 0.35f, 0.8f),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
         cursor->setZOrder(100);
         cursorLayer->addChild(cursor);
@@ -1490,7 +1533,7 @@ void MacroTimelineLayer::onZoomOutPressed(CCObject*) {
 // Input handling
 bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
     if (!FLAlertLayer::ccTouchBegan(touch, event)) return false;
-    if (!timeline) return false;
+    if (!timeline) return true;
 
     const CCPoint layerPos = m_mainLayer->convertToNodeSpace(touch->getLocation());
     const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
@@ -1514,7 +1557,9 @@ bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
         return true;
     }
 
-    return false;
+    // FLAlertLayer has already routed this touch to its menus. Keep the
+    // touch captured so buttons receive their normal ended/cancelled state.
+    return true;
 }
 
 void MacroTimelineLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
