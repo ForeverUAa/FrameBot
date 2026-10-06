@@ -1122,59 +1122,36 @@ void MacroTimelineLayer::initToolbar() {
     toolbarMenu = CCMenu::create();
     toolbarMenu->setPosition({
         m_mainLayer->getContentSize().width / 2.0f,
-        m_mainLayer->getContentSize().height - 34.0f
+        m_mainLayer->getContentSize().height - 31.0f
     });
     toolbarMenu->setZOrder(100);
     m_mainLayer->addChild(toolbarMenu);
 
-    auto addSpriteButton = [&](const char* frame, float x, SEL_MenuHandler cb) {
-        auto* spr = CCSprite::createWithSpriteFrameName(frame);
-        auto* btn = CCMenuItemSpriteExtra::create(spr, this, cb);
-        btn->setScale(0.46f);
-        btn->setPositionX(x);
-        toolbarMenu->addChild(btn);
-        return btn;
+    auto addButton = [&](const char* text, float x, SEL_MenuHandler cb) {
+        auto* sprite = ButtonSprite::create(text);
+        sprite->setScale(0.46f);
+        auto* item = CCMenuItemSpriteExtra::create(sprite, this, cb);
+        item->setPositionX(x);
+        toolbarMenu->addChild(item);
+        return item;
     };
 
-    playBtn = addSpriteButton(
-        "GJ_timeIcon_001.png", -145.0f,
-        menu_selector(MacroTimelineLayer::onPlayPressed)
-    );
-    pauseBtn = addSpriteButton(
-        "GJ_pauseBtn_001.png", -117.0f,
-        menu_selector(MacroTimelineLayer::onPausePressed)
-    );
-    stopBtn = addSpriteButton(
-        "GJ_deleteIcon_001.png", -89.0f,
-        menu_selector(MacroTimelineLayer::onStopPressed)
-    );
-    stepFrameBtn = addSpriteButton(
-        "GJ_arrow_02_001.png", -61.0f,
-        menu_selector(MacroTimelineLayer::onStepFramePressed)
-    );
-    zoomOutBtn = addSpriteButton(
-        "edit_leftBtn_001.png", -25.0f,
-        menu_selector(MacroTimelineLayer::onZoomOutPressed)
-    );
-    zoomInBtn = addSpriteButton(
-        "edit_rightBtn_001.png", 3.0f,
-        menu_selector(MacroTimelineLayer::onZoomInPressed)
-    );
+    playBtn = addButton("Play", -150.0f, menu_selector(MacroTimelineLayer::onPlayPressed));
+    pauseBtn = addButton("Pause", -105.0f, menu_selector(MacroTimelineLayer::onPausePressed));
+    stopBtn = addButton("Stop", -55.0f, menu_selector(MacroTimelineLayer::onStopPressed));
+    stepFrameBtn = addButton("Step", -5.0f, menu_selector(MacroTimelineLayer::onStepFramePressed));
+    zoomOutBtn = addButton("Zoom -", 50.0f, menu_selector(MacroTimelineLayer::onZoomOutPressed));
+    zoomInBtn = addButton("Zoom +", 105.0f, menu_selector(MacroTimelineLayer::onZoomInPressed));
+    cbfModeToggle = addButton("CBF", 153.0f, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
 
-    auto cbfLabel = CCLabelBMFont::create("CBF", "bigFont.fnt");
-    cbfLabel->setScale(0.30f);
-    cbfModeToggle = CCMenuItemSpriteExtra::create(cbfLabel, this, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
-    cbfModeToggle->setPositionX(45.0f);
-    toolbarMenu->addChild(cbfModeToggle);
-
-    auto taskLabel = CCLabelBMFont::create("Tasks", "bigFont.fnt");
-    taskLabel->setScale(0.30f);
-    auto* taskBtn = CCMenuItemLabel::create(
-        taskLabel,
+    auto* taskSprite = ButtonSprite::create("Tasks");
+    taskSprite->setScale(0.46f);
+    auto* taskBtn = CCMenuItemSpriteExtra::create(
+        taskSprite,
         this,
         menu_selector(MacroTimelineLayer::onTasksPressed)
     );
-    taskBtn->setPositionX(105.0f);
+    taskBtn->setPositionX(205.0f);
     taskBtn->setID("tasks");
     toolbarMenu->addChild(taskBtn);
 }
@@ -1371,7 +1348,7 @@ void MacroTimelineLayer::renderEvents() {
         // Skip if outside visible area
         if (x < 0 || x > renderState.timelineSize.width) continue;
 
-        int y = evt.player2 ? p2Y : p1Y;
+        float y = evt.player2 ? p2Y : p1Y;
         ccColor3B color = getActionColor(evt.down);
 
         // Keep the marker slightly wider than the visual frame so both presses
@@ -1535,7 +1512,6 @@ bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
     if (!FLAlertLayer::ccTouchBegan(touch, event)) return false;
     if (!timeline) return true;
 
-    const CCPoint layerPos = m_mainLayer->convertToNodeSpace(touch->getLocation());
     const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
     int eventIdx = hitTestEvent(eventPos);
     if (eventIdx >= 0) {
