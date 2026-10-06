@@ -66,8 +66,8 @@ private:
         float trackHeight = 40.0f;       // Height per player track
         float eventHeight = 16.0f;
         int firstVisibleFrame = 0;
-        int lastVisibleFrame = 1000;
-        CCSize timelineSize = {800, 200};
+        int lastVisibleFrame = 160;
+        CCSize timelineSize = {650.0f, 390.0f};
     } renderState;
 
     // Input state
