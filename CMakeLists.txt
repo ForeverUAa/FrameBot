@@ -5,7 +5,7 @@ set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 project(xdBot2 VERSION 1.0.0)
- 
+
 add_library(${PROJECT_NAME} SHARED
     src/main.cpp
     src/global.cpp
@@ -32,6 +32,10 @@ add_library(${PROJECT_NAME} SHARED
     src/ui/load_macro_layer.cpp
     src/ui/clickbot_layer.cpp
     src/ui/button_setting.cpp
+
+    src/ui/macro_timeline.cpp
+    src/ui/macro_timeline_layer.cpp
+    src/ui/macro_inspector.cpp
 
     src/practice_fixes/input.cpp
     src/practice_fixes/player.cpp

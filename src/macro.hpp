@@ -5,6 +5,7 @@
 #include "utils/utils.hpp"
 
 using namespace geode::prelude;
+using namespace nlohmann;
 
 #define DIF(a, b) (std::fabs((a) - (b)) > 0.001f)
 
@@ -22,16 +23,62 @@ enum state {
 };
 
 struct input : gdr::Input {
+    // Subframe timing support (0.0 to 1.0 range within a frame)
+    double subframe = 0.0;
+
     input() = default;
 
-    input(int frame, int button, bool player2, bool down)
-        : Input(frame, button, player2, down) {}
+    input(int frame, int button, bool player2, bool down, double subframe = 0.0)
+        : Input(frame, button, player2, down), subframe(subframe) {}
 
+    // Get total precise time in frames (frame + subframe)
+    inline double getPreciseFrame() const {
+        return static_cast<double>(frame) + subframe;
+    }
+
+    // Set timing from precise frame value
+    inline void setPreciseFrame(double preciseTime) {
+        frame = static_cast<uint32_t>(preciseTime);
+        subframe = preciseTime - frame;
+        // Clamp subframe to valid range
+        if (subframe < 0.0) {
+            frame--;
+            subframe += 1.0;
+        } else if (subframe >= 1.0) {
+            frame++;
+            subframe -= 1.0;
+        }
+    }
+
+    // Override comparison for timeline ordering (considers subframes)
+    inline bool operator<(const input& other) const {
+        if (frame != other.frame) return frame < other.frame;
+        return subframe < other.subframe;
+    }
+
+    // Standard equality check
     bool operator==(const input& other) const {
         return frame == other.frame &&
                player2 == other.player2 &&
                button == other.button &&
-               down == other.down;
+               down == other.down &&
+               std::fabs(subframe - other.subframe) < 0.0001;  // Account for floating point precision
+    }
+
+    // Serialization support for subframe data
+    inline void parseExtension(json::object_t obj) override {
+        if (obj.contains("subframe") && !obj["subframe"].is_null()) {
+            subframe = obj["subframe"].get<double>();
+        }
+    }
+
+    inline json::object_t saveExtension() const override {
+        json::object_t obj;
+        // Only save subframe if it's non-zero (backward compatibility)
+        if (subframe > 0.0001) {
+            obj["subframe"] = subframe;
+        }
+        return obj;
     }
 };
 
