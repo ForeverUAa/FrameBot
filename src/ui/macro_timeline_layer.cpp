@@ -189,23 +189,47 @@ void MacroTimelineLayer::initTimeline() {
 }
 
 void MacroTimelineLayer::initInspector() {
-    // Create inspector panel on the right side
     inspectorBg = CCScale9Sprite::create("GJ_square_02_001.png");
-    inspectorBg->setScale(1.0f);
-    inspectorBg->setContentSize({250, 200});
-    inspectorBg->setPosition({this->getContentSize().width - 135, this->getContentSize().height / 2});
+    inspectorBg->setContentSize({250, 300});
+    inspectorBg->setPosition({this->getContentSize().width - 135, this->getContentSize().height / 2 - 20});
     inspectorBg->setColor({40, 50, 60});
     inspectorBg->setOpacity(220);
     inspectorBg->setZOrder(45);
     this->addChild(inspectorBg);
 
-    CCLabelBMFont* lbl = CCLabelBMFont::create("Event Inspector", "bigFont.fnt");
-    lbl->setScale(0.4f);
-    lbl->setAnchorPoint({0.5f, 1});
-    lbl->setPosition({inspectorBg->getPositionX(), inspectorBg->getPositionY() + 95});
-    this->addChild(lbl);
-}
+    auto title = CCLabelBMFont::create("Event Inspector", "bigFont.fnt");
+    title->setScale(0.4f);
+    title->setPosition({inspectorBg->getContentSize().width / 2, 135});
+    inspectorBg->addChild(title);
 
+    inspectorMenu = CCMenu::create();
+    inspectorMenu->setPosition({0, 0});
+    inspectorBg->addChild(inspectorMenu);
+
+    auto addButton = [&](const char* text, float x, float y, SEL_MenuHandler cb) {
+        auto label = CCLabelBMFont::create(text, "bigFont.fnt");
+        label->setScale(0.35f);
+        auto item = CCMenuItemLabel::create(label, this, cb);
+        item->setPosition({x, y});
+        inspectorMenu->addChild(item);
+    };
+
+    addButton("-", 35, 95, menu_selector(MacroTimelineLayer::onFrameDown));
+    addButton("+", 215, 95, menu_selector(MacroTimelineLayer::onFrameUp));
+    addButton("-", 35, 65, menu_selector(MacroTimelineLayer::onSubframeDown));
+    addButton("+", 215, 65, menu_selector(MacroTimelineLayer::onSubframeUp));
+    addButton("Button", 125, 35, menu_selector(MacroTimelineLayer::onButtonCycle));
+    addButton("Player", 65, 5, menu_selector(MacroTimelineLayer::onPlayerToggle));
+    addButton("Action", 185, 5, menu_selector(MacroTimelineLayer::onActionToggle));
+
+    for (int i = 0; i < 8; ++i) {
+        inspectorLabels[i] = CCLabelBMFont::create("", "chatFont.fnt");
+        inspectorLabels[i]->setScale(0.35f);
+        inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
+        inspectorLabels[i]->setPosition({12, 115 - i * 14});
+        inspectorBg->addChild(inspectorLabels[i]);
+    }
+}
 void MacroTimelineLayer::updateTimeline(float dt) {
     if (!timeline) return;
 
@@ -216,6 +240,8 @@ void MacroTimelineLayer::updateTimeline(float dt) {
     renderEvents();
     renderPlayhead();
     renderInspector();
+    updateInspectorPanel();
+    updateScrollBounds();
 }
 
 void MacroTimelineLayer::renderEvents() {
@@ -317,12 +343,14 @@ void MacroTimelineLayer::renderPlayhead() {
 }
 
 void MacroTimelineLayer::renderInspector() {
-    if (!inspector->hasData()) return;
+    if (!inspector->hasData()) {
+        for (auto* label : inspectorLabels)
+            if (label) label->setVisible(false);
+        return;
+    }
 
-    const auto& details = inspector->getDetails();
-
-    // Update inspector labels (simplified for now)
-    // In full implementation, this would create proper UI elements
+    for (auto* label : inspectorLabels)
+        if (label) label->setVisible(true);
 }
 
 void MacroTimelineLayer::updateFrameCounter() {
@@ -342,11 +370,15 @@ void MacroTimelineLayer::scheduleUpdate() {
 
 // Event handlers
 void MacroTimelineLayer::onPlayPressed(CCObject*) {
-    // TODO: Connect to Global::macro playback
+    if (!timeline || timeline->getEventCount() == 0) return;
+    timeline->setPlayhead(timeline->getPlayheadFrame(), timeline->getPlayheadSubframe());
+    this->unschedule(schedule_selector(MacroTimelineLayer::updateTimeline));
+    this->schedule(schedule_selector(MacroTimelineLayer::updateTimeline), 1.f / 60.f);
 }
 
 void MacroTimelineLayer::onPausePressed(CCObject*) {
-    // TODO: Pause playback
+    this->unschedule(schedule_selector(MacroTimelineLayer::updateTimeline));
+    this->schedule(schedule_selector(MacroTimelineLayer::updateTimeline), 0.016f);
 }
 
 void MacroTimelineLayer::onStopPressed(CCObject*) {
@@ -355,7 +387,8 @@ void MacroTimelineLayer::onStopPressed(CCObject*) {
 }
 
 void MacroTimelineLayer::onStepFramePressed(CCObject*) {
-    // TODO: Step one frame forward
+    if (!timeline) return;
+    timeline->setPlayhead(timeline->getPlayheadFrame() + 1, timeline->getPlayheadSubframe());
 }
 
 void MacroTimelineLayer::onCBFTogglePressed(CCObject*) {
@@ -373,18 +406,51 @@ void MacroTimelineLayer::onZoomOutPressed(CCObject*) {
 }
 
 // Input handling
-bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent* event) {
-    return true;
-}
+bool MacroTimelineLayer::onTouchBegan(CCTouch* touch, CCEvent*) {
+    if (!timeline) return false;
 
-void MacroTimelineLayer::onTouchMoved(CCTouch* touch, CCEvent* event) {}
-
-void MacroTimelineLayer::onTouchEnded(CCTouch* touch, CCEvent* event) {
-    CCPoint pos = touch->getLocation();
+    CCPoint pos = this->convertToNodeSpace(touch->getLocation());
     int eventIdx = hitTestEvent(pos);
     if (eventIdx >= 0) {
         timeline->selectEvent(eventIdx);
+        inputState.isDragging = true;
+        inputState.draggedEventIdx = eventIdx;
+        inputState.dragStartX = pos.x;
+        inputState.dragStartPreciseFrame = timeline->getEvent(eventIdx)->getPreciseFrame();
+        return true;
     }
+
+    // Clicking the timeline ruler moves the playhead.
+    const float timelineTop = this->getContentSize().height - 60.0f;
+    if (pos.x >= 10.0f && pos.x <= 810.0f &&
+        pos.y >= timelineTop - renderState.timelineSize.height &&
+        pos.y <= timelineTop) {
+        float localX = pos.x - 10.0f;
+        timeline->setPlayheadPrecise(
+            (localX + timeline->getScrollOffset()) / renderState.pixelsPerFrame
+        );
+        return true;
+    }
+
+    return false;
+}
+
+void MacroTimelineLayer::onTouchMoved(CCTouch* touch, CCEvent*) {
+    if (!inputState.isDragging || inputState.draggedEventIdx < 0) return;
+
+    CCPoint pos = this->convertToNodeSpace(touch->getLocation());
+    float localX = pos.x - 10.0f;
+    double precise = (localX + timeline->getScrollOffset()) / renderState.pixelsPerFrame;
+
+    if (precise < 0.0) precise = 0.0;
+    timeline->setEventFrame(inputState.draggedEventIdx, static_cast<int>(precise));
+    if (timeline->isCBFModeEnabled())
+        timeline->setEventSubframe(inputState.draggedEventIdx, precise - std::floor(precise));
+}
+
+void MacroTimelineLayer::onTouchEnded(CCTouch*, CCEvent*) {
+    inputState.isDragging = false;
+    inputState.draggedEventIdx = -1;
 }
 
 // Helper functions
@@ -473,8 +539,54 @@ void MacroTimelineLayer::updateScrollBounds() {
 }
 
 void MacroTimelineLayer::updateInspectorPanel() {
-    if (!inspector->hasData()) return;
+    if (!inspector || !inspector->hasData()) return;
 
-    const auto& details = inspector->getDetails();
-    // TODO: Update inspector UI with event details
+    const auto& d = inspector->getDetails();
+    const std::string values[] = {
+        fmt::format("Frame: {}", d.frame),
+        fmt::format("Subframe: {:.2f}", d.subframe),
+        fmt::format("Button: {} ({})", d.button, getButtonName(d.button)),
+        fmt::format("Player: {}", d.player2 ? "P2" : "P1"),
+        fmt::format("Action: {}", d.pressed ? "Press" : "Release"),
+        fmt::format("Index: {}", d.index),
+        fmt::format("Previous: {}", d.prevEventIndex >= 0 ? fmt::format("{} @ {}", d.prevEventIndex, d.prevEventFrame) : "None"),
+        fmt::format("Next: {}", d.nextEventIndex >= 0 ? fmt::format("{} @ {}", d.nextEventIndex, d.nextEventFrame) : "None")
+    };
+
+    for (int i = 0; i < 8; ++i)
+        inspectorLabels[i]->setString(values[i].c_str());
 }
+
+void MacroTimelineLayer::adjustSelectedFrame(int delta) {
+    if (!inspector->hasData()) return;
+    inspector->setFrame(std::max(0, inspector->getDetails().frame + delta));
+}
+
+void MacroTimelineLayer::adjustSelectedSubframe(double delta) {
+    if (!inspector->hasData()) return;
+    inspector->setSubframe(inspector->getDetails().subframe + delta);
+}
+
+void MacroTimelineLayer::cycleSelectedButton() {
+    if (!inspector->hasData()) return;
+    int button = inspector->getDetails().button;
+    inspector->setButton(button >= 3 ? 1 : button + 1);
+}
+
+void MacroTimelineLayer::toggleSelectedPlayer() {
+    if (!inspector->hasData()) return;
+    inspector->setPlayer(!inspector->getDetails().player2);
+}
+
+void MacroTimelineLayer::toggleSelectedAction() {
+    if (!inspector->hasData()) return;
+    inspector->setPressed(!inspector->getDetails().pressed);
+}
+
+void MacroTimelineLayer::onFrameDown(CCObject*) { adjustSelectedFrame(-1); }
+void MacroTimelineLayer::onFrameUp(CCObject*) { adjustSelectedFrame(1); }
+void MacroTimelineLayer::onSubframeDown(CCObject*) { adjustSelectedSubframe(-0.01); }
+void MacroTimelineLayer::onSubframeUp(CCObject*) { adjustSelectedSubframe(0.01); }
+void MacroTimelineLayer::onButtonCycle(CCObject*) { cycleSelectedButton(); }
+void MacroTimelineLayer::onPlayerToggle(CCObject*) { toggleSelectedPlayer(); }
+void MacroTimelineLayer::onActionToggle(CCObject*) { toggleSelectedAction(); }
