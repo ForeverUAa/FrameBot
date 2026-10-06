@@ -38,6 +38,16 @@ namespace {
         bool finished = false;
     };
 
+    struct FrameTaskProbe {
+        int frame = 0;
+        double subframe = 0.0;
+        int contextShift = 0;
+        int pairedFrame = 0;
+        double pairedSubframe = 0.0;
+        bool paired = false;
+        bool alternating = false;
+    };
+
     class FrameTaskPopup final : public framebot::Popup<> {
     public:
         static FrameTaskPopup* create(MacroTimeline* timeline) {
@@ -188,6 +198,29 @@ namespace {
                 case FrameWindowKind::Impossible: return "X";
                 default: return "A";
             }
+        }
+
+        int findTaskEvent(const Macro& macro, const FrameTask& task) const {
+            int best = -1;
+            double bestDistance = std::numeric_limits<double>::max();
+            const double precise = static_cast<double>(task.frame) + task.subframe;
+
+            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
+                const auto& event = macro.inputs[i];
+
+                if (event.button != task.button ||
+                    event.player2 != task.player2 ||
+                    event.down != task.down)
+                    continue;
+
+                double distance = std::abs(event.getPreciseFrame() - precise);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = i;
+                }
+            }
+
+            return best;
         }
 
         int findEventNear(const Macro& macro, const input& original, double precise) const {

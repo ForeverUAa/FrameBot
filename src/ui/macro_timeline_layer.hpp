@@ -27,7 +27,7 @@ public:
 
 private:
     bool setup() override;
-    void keyBackClicked() override;
+    void keyBackClicked();
 
     Macro* macro = nullptr;
     std::unique_ptr<MacroTimeline> timeline;
