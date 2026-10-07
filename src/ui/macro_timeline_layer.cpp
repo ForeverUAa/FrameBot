@@ -129,6 +129,8 @@ namespace {
             if (m_testing || !m_timeline)
                 return;
 
+            clearMarkers();
+
             int index = m_timeline->getSelectedEventIndex();
             FrameTask task = makeTask(index);
             if (task.eventIndex < 0) {
@@ -146,6 +148,7 @@ namespace {
             if (m_testing || !m_timeline)
                 return;
 
+            clearMarkers();
             generateAllTasks();
             if (s_tasks.empty()) {
                 m_status->setString("No inputs to analyze");
@@ -154,6 +157,14 @@ namespace {
 
             s_grid = 0;
             startTesting(0, true);
+        }
+
+        static constexpr int markerTag = 0xF7A5;
+
+        void clearMarkers() {
+            if (auto* pl = PlayLayer::get())
+                if (auto* markerLayer = pl->getChildByTag(markerTag))
+                    markerLayer->removeFromParentAndCleanup(true);
         }
 
         void onStop(CCObject*) {
@@ -642,9 +653,10 @@ namespace {
 
             m_status->setString(
                 fmt::format(
-                    "Testing {}/{}: frame {}",
-                    m_candidateIndex + 1,
-                    m_candidates.size(),
+                    "{} {}/{} | frame {}",
+                    m_testingAll ? "Analyze" : "Test",
+                    m_taskIndex + 1,
+                    s_tasks.size(),
                     m_targetFrame
                 ).c_str()
             );
@@ -718,16 +730,14 @@ namespace {
             if (m_probeStage == ProbeStage::Primary) {
                 task.results.push_back(result);
 
-                // The original macro timing must survive. If it does not, probing this
-                // input would only measure a broken baseline.
+                    // The original macro timing must survive. If it does not, probing this
+                // input would only measure a broken baseline. For whole-level analysis,
+                // skip this input and continue instead of aborting the entire run.
                 if (offset == 0 && !passed) {
                     task.baselineFailed = true;
                     m_candidates.clear();
-                    m_candidateIndex = 0;
-                    finalizeTaskWindow(task);
-                    task.finished = true;
-                    m_completedAll = false;
-                    finishTesting();
+                    ++m_candidateIndex;
+                    beginCandidate();
                     return;
                 }
 
@@ -1023,9 +1033,7 @@ namespace {
             if (!pl)
                 return;
 
-            constexpr int markerTag = 0xF7A5;
-
-            auto* markerLayer = pl->getChildByTag(markerTag);
+            auto* markerLayer = pl->getChildByTag(FrameTaskPopup::markerTag);
             if (!markerLayer) {
                 markerLayer = CCLayer::create();
                 markerLayer->setTag(markerTag);
