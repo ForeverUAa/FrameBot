@@ -5,6 +5,62 @@
 
 #include <Geode/modify/PlayLayer.hpp>
 
+namespace {
+    int inferMacroSubdivision(const Macro& macro) {
+        bool hasSubframes = false;
+
+        for (const auto& event : macro.inputs) {
+            if (event.subframe > 0.000001) {
+                hasSubframes = true;
+                break;
+            }
+        }
+
+        if (!hasSubframes)
+            return 0;
+
+        for (int divider = 1; divider <= 1000; ++divider) {
+            bool fits = true;
+
+            for (const auto& event : macro.inputs) {
+                if (event.subframe <= 0.000001)
+                    continue;
+
+                double const snapped =
+                    std::round(event.subframe * divider) / divider;
+
+                if (std::abs(snapped - event.subframe) > 0.000001) {
+                    fits = false;
+                    break;
+                }
+            }
+
+            if (fits)
+                return divider;
+        }
+
+        return std::clamp(cbf::substepDivider(), 1, 1000);
+    }
+}
+
+void Macro::parseExtension(json::object_t obj) {
+    if (!obj.contains("subdivision") || obj["subdivision"].is_null())
+        return;
+
+    try {
+        subdivision = std::clamp(obj["subdivision"].get<int>(), 1, 1000);
+    } catch (...) {
+        subdivision = 0;
+    }
+}
+
+json::object_t Macro::saveExtension() const {
+    json::object_t obj;
+    if (subdivision > 0)
+        obj["subdivision"] = subdivision;
+    return obj;
+}
+
 void Macro::recordAction(int frame, int button, bool player2, bool hold) {
     PlayLayer* pl = PlayLayer::get();
     if (!pl) return;
@@ -166,7 +222,9 @@ int Macro::save(std::string author, std::string desc, std::string path, bool jso
 
     g.macro.author = author;
     g.macro.description = desc;
-    g.macro.duration = g.macro.inputs.back().frame / g.macro.framerate;
+    g.macro.subdivision = inferMacroSubdivision(g.macro);
+    g.macro.duration =
+        static_cast<float>(g.macro.inputs.back().getPreciseFrame() / g.macro.framerate);
 
     std::ofstream f(path, std::ios::binary);
 
