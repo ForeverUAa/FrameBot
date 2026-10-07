@@ -414,8 +414,20 @@ namespace {
             if (m_timeline) {
                 int const selected = m_timeline->getSelectedEventIndex();
                 if (selected >= 0) {
-                    s_tasks.push_back(makeTask(selected));
-                    m_selectedTaskIndex = static_cast<int>(s_tasks.size()) - 1;
+                    int existing = -1;
+                    for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
+                        if (s_tasks[i].eventIndex == selected) {
+                            existing = i;
+                            break;
+                        }
+                    }
+
+                    if (existing < 0) {
+                        s_tasks.push_back(makeTask(selected));
+                        existing = static_cast<int>(s_tasks.size()) - 1;
+                    }
+
+                    m_selectedTaskIndex = existing;
                 }
             }
 
