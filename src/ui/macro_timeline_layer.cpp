@@ -2652,7 +2652,7 @@ void MacroTimelineLayer::renderEvents() {
 
         if (selected) {
             auto* time = CCLabelBMFont::create(
-                formatTime(evt.frame, evt.subframe).c_str(),
+                fmt::format("{}.{}", evt.frame, static_cast<int>(evt.subframe * 1000.0)).c_str(),
                 "chatFont.fnt"
             );
             time->setScale(0.29f);
@@ -2862,16 +2862,16 @@ void MacroTimelineLayer::onPlayPressed(CCObject*) {
     cbf::Engine::get()->reset();
 
     if (pl) {
-        if (pl->m_levelEndAnimationStarted || pl->m_isDead)
-            pl->resetLevelFromStart();
-        else if (pl->m_isPaused)
-            pl->pauseGame(true);
-        else
-            pl->resetLevelFromStart();
+        if (!pl->m_isPaused && !pl->m_levelEndAnimationStarted) {
+            if (pl->m_levelSettings->m_platformerMode)
+                pl->resetLevelFromStart();
+            else
+                pl->resetLevel();
+        } else {
+            g.restart = true;
+        }
     }
 
-    Interface::updateLabels();
-    Interface::updateButtons();
     Macro::updateTPS();
 
     toolbarPlaying = true;
@@ -2891,17 +2891,12 @@ void MacroTimelineLayer::onPausePressed(CCObject*) {
     if (pl && !pl->m_isPaused)
         pl->pauseGame(false);
 
-    Interface::updateLabels();
-    Interface::updateButtons();
-
     toolbarPlaying = false;
 }
 
 void MacroTimelineLayer::onStopPressed(CCObject*) {
-    if (Global::get().state == state::playing)
-        Macro::togglePlaying();
-
     Macro::resetState();
+    cbf::Engine::get()->reset();
     timeline->setPlayhead(0, 0.0);
     toolbarPlaying = false;
 }
