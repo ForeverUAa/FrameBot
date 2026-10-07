@@ -2323,10 +2323,16 @@ void MacroTimelineLayer::initToolbar() {
     auto win = CCDirector::sharedDirector()->getWinSize();
     float width = win.width - 24.0f;
 
+    auto* toolbarBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+    toolbarBg->setContentSize({width, 38.0f});
+    toolbarBg->setPosition({0.0f, 204.0f});
+    toolbarBg->setColor({18, 20, 26});
+    toolbarBg->setOpacity(232);
+    toolbarBg->setZOrder(90);
+    overlay->addChild(toolbarBg);
+
     toolbarMenu = CCMenu::create();
-    // overlay is centered on screen, so this menu's symmetric child positions
-    // should use the overlay origin directly.
-    toolbarMenu->setPosition({0.0f, 202.0f});
+    toolbarMenu->setPosition({0.0f, 204.0f});
     toolbarMenu->setZOrder(100);
     overlay->addChild(toolbarMenu);
 
@@ -2389,14 +2395,12 @@ void MacroTimelineLayer::initTimeline() {
     constexpr float bottom = 42.0f;
     float width = win.width - 24.0f;
 
-    renderState.timelineSize = CCSizeMake(width, 96.0f);
-    renderState.rulerHeight = 24.0f;
-    renderState.trackHeight = 34.0f;
-    renderState.eventHeight = 18.0f;
+    renderState.timelineSize = CCSizeMake(width, 132.0f);
+    renderState.rulerHeight = 28.0f;
+    renderState.trackHeight = 42.0f;
+    renderState.eventHeight = 20.0f;
 
     timelineLayer = CCLayer::create();
-    // CCLayer uses its bottom-left origin, so offset it by half the timeline
-    // width to make its content centered under the overlay root.
     timelineLayer->setPosition({-width / 2.0f, bottom});
     timelineLayer->setContentSize(renderState.timelineSize);
     timelineLayer->setZOrder(20);
@@ -2405,46 +2409,70 @@ void MacroTimelineLayer::initTimeline() {
     auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     bg->setContentSize(renderState.timelineSize);
     bg->setPosition(renderState.timelineSize / 2.0f);
-    bg->setColor({0, 0, 0});
-    bg->setOpacity(135);
+    bg->setColor({10, 12, 17});
+    bg->setOpacity(242);
     timelineLayer->addChild(bg);
+
+    auto* topBar = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+    topBar->setContentSize({width - 2.0f, renderState.rulerHeight});
+    topBar->setPosition({
+        width / 2.0f,
+        renderState.timelineSize.height - renderState.rulerHeight / 2.0f
+    });
+    topBar->setColor({23, 26, 34});
+    topBar->setOpacity(245);
+    timelineLayer->addChild(topBar, 1);
+
+    auto* footer = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+    footer->setContentSize({width - 2.0f, 20.0f});
+    footer->setPosition({width / 2.0f, 10.0f});
+    footer->setColor({21, 24, 31});
+    footer->setOpacity(245);
+    timelineLayer->addChild(footer, 1);
 
     rulerLayer = CCLayer::create();
     rulerLayer->setContentSize({width, renderState.rulerHeight});
-    rulerLayer->setPosition({0.0f, renderState.timelineSize.height - renderState.rulerHeight});
-    timelineLayer->addChild(rulerLayer);
+    rulerLayer->setPosition({
+        0.0f,
+        renderState.timelineSize.height - renderState.rulerHeight
+    });
+    timelineLayer->addChild(rulerLayer, 3);
 
     eventsLayer = CCLayer::create();
     eventsLayer->setContentSize({
         width,
-        renderState.timelineSize.height - renderState.rulerHeight
+        renderState.timelineSize.height - renderState.rulerHeight - 20.0f
     });
-    eventsLayer->setPosition({0.0f, 0.0f});
-    timelineLayer->addChild(eventsLayer);
+    eventsLayer->setPosition({0.0f, 20.0f});
+    timelineLayer->addChild(eventsLayer, 2);
 
     cursorLayer = CCLayer::create();
-    cursorLayer->setContentSize(eventsLayer->getContentSize());
+    cursorLayer->setContentSize({
+        width,
+        renderState.timelineSize.height - 20.0f
+    });
+    cursorLayer->setPosition({0.0f, 20.0f});
     cursorLayer->setZOrder(10);
     timelineLayer->addChild(cursorLayer);
 
-    frameCounterLabel = CCLabelBMFont::create("Frame: 0", "chatFont.fnt");
-    frameCounterLabel->setScale(0.50f);
+    frameCounterLabel = CCLabelBMFont::create("FRAME 0000", "chatFont.fnt");
+    frameCounterLabel->setScale(0.46f);
     frameCounterLabel->setAnchorPoint({0.0f, 0.5f});
-    frameCounterLabel->setPosition({-width / 2.0f + 16.0f, -60.0f});
-    overlay->addChild(frameCounterLabel);
+    frameCounterLabel->setPosition({14.0f, 10.0f});
+    timelineLayer->addChild(frameCounterLabel, 5);
 
-    subframeLabel = CCLabelBMFont::create("0.00", "chatFont.fnt");
-    subframeLabel->setScale(0.50f);
+    subframeLabel = CCLabelBMFont::create("SUB 00%", "chatFont.fnt");
+    subframeLabel->setScale(0.46f);
     subframeLabel->setAnchorPoint({0.0f, 0.5f});
-    subframeLabel->setPosition({-width / 2.0f + 105.0f, -60.0f});
-    overlay->addChild(subframeLabel);
+    subframeLabel->setPosition({104.0f, 10.0f});
+    timelineLayer->addChild(subframeLabel, 5);
 
     timelineInfoLabel = CCLabelBMFont::create("", "chatFont.fnt");
-    timelineInfoLabel->setScale(0.34f);
-    timelineInfoLabel->setAnchorPoint({0.0f, 0.5f});
-    timelineInfoLabel->setOpacity(185);
-    timelineInfoLabel->setPosition({-width / 2.0f + 18.0f, -39.0f});
-    overlay->addChild(timelineInfoLabel);
+    timelineInfoLabel->setScale(0.31f);
+    timelineInfoLabel->setAnchorPoint({1.0f, 0.5f});
+    timelineInfoLabel->setOpacity(180);
+    timelineInfoLabel->setPosition({width - 14.0f, 10.0f});
+    timelineLayer->addChild(timelineInfoLabel, 5);
 }
 
 void MacroTimelineLayer::updateTimeline(float dt) {
@@ -2454,6 +2482,18 @@ void MacroTimelineLayer::updateTimeline(float dt) {
         int frame = Global::getCurrentFrame();
         timeline->setPlayhead(frame, 0.0);
     }
+
+    const float ppf = std::max(0.5f, renderState.pixelsPerFrame);
+    const float scroll = static_cast<float>(timeline->getScrollOffset());
+    renderState.firstVisibleFrame =
+        std::max(0, static_cast<int>(std::floor(scroll / ppf)) - 2);
+    renderState.lastVisibleFrame =
+        std::max(
+            renderState.firstVisibleFrame + 1,
+            static_cast<int>(std::ceil(
+                (scroll + renderState.timelineSize.width) / ppf
+            )) + 2
+        );
 
     inspector->updateFromTimeline();
     updateFrameCounter();
@@ -2469,99 +2509,251 @@ void MacroTimelineLayer::updateTimeline(float dt) {
 void MacroTimelineLayer::renderEvents() {
     eventsLayer->removeAllChildren();
 
-    // Subtle track lines.
-    for (int i = 0; i <= 2; ++i) {
+    const float trackHeight = renderState.trackHeight;
+    const float p1Y = trackHeight * 1.5f;
+    const float p2Y = trackHeight * 0.5f;
+
+    auto drawLine = [&](float y, float alpha) {
         auto* line = CCDrawNode::create();
-        float y = i * renderState.trackHeight;
         line->drawRect(
             CCRectMake(0.0f, y, renderState.timelineSize.width, 1.0f),
-            ccc4f(1.0f, 1.0f, 1.0f, i == 0 ? 0.72f : 0.20f),
+            ccc4f(1.0f, 1.0f, 1.0f, alpha),
             0.0f,
             ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
         eventsLayer->addChild(line);
+    };
+
+    drawLine(0.0f, 0.12f);
+    drawLine(trackHeight, 0.38f);
+    drawLine(trackHeight * 2.0f, 0.12f);
+
+    auto* lanes = CCDrawNode::create();
+    lanes->drawRect(
+        CCRectMake(
+            0.0f,
+            trackHeight,
+            renderState.timelineSize.width,
+            trackHeight
+        ),
+        ccc4f(0.18f, 0.22f, 0.30f, 0.10f),
+        0.0f,
+        ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+    );
+    eventsLayer->addChild(lanes, -3);
+
+    const float ppf = std::max(0.5f, renderState.pixelsPerFrame);
+    const int gridStep =
+        ppf >= 10.0f ? 5 :
+        ppf >= 6.0f ? 10 :
+        ppf >= 3.0f ? 20 : 30;
+
+    auto* grid = CCDrawNode::create();
+    const int firstGrid =
+        (renderState.firstVisibleFrame / gridStep) * gridStep;
+
+    for (int frame = firstGrid;
+         frame <= renderState.lastVisibleFrame;
+         frame += gridStep) {
+        const float x = frameToPixels(frame);
+        if (x < -1.0f || x > renderState.timelineSize.width + 1.0f)
+            continue;
+
+        grid->drawRect(
+            CCRectMake(
+                x - 0.5f,
+                0.0f,
+                1.0f,
+                trackHeight * 2.0f
+            ),
+            ccc4f(0.42f, 0.47f, 0.58f, 0.18f),
+            0.0f,
+            ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+        );
     }
+    eventsLayer->addChild(grid, -2);
+
+    auto* p1 = CCLabelBMFont::create("P1", "chatFont.fnt");
+    p1->setScale(0.30f);
+    p1->setAnchorPoint({0.0f, 0.5f});
+    p1->setPosition({8.0f, p1Y});
+    p1->setOpacity(160);
+    eventsLayer->addChild(p1, 2);
+
+    auto* p2 = CCLabelBMFont::create("P2", "chatFont.fnt");
+    p2->setScale(0.30f);
+    p2->setAnchorPoint({0.0f, 0.5f});
+    p2->setPosition({8.0f, p2Y});
+    p2->setOpacity(160);
+    eventsLayer->addChild(p2, 2);
 
     if (!macro || macro->inputs.empty())
         return;
 
-    const float p1Y = renderState.trackHeight * 0.5f;
-    const float p2Y = renderState.trackHeight * 1.5f;
+    const float labelStartX = 30.0f;
 
     for (int i = 0; i < static_cast<int>(macro->inputs.size()); ++i) {
         const auto& evt = macro->inputs[i];
-        float x = frameToPixels(evt.frame, evt.subframe);
-        if (x < 0.0f || x > renderState.timelineSize.width)
+        const float x = frameToPixels(evt.frame, evt.subframe);
+
+        if (x < -20.0f || x > renderState.timelineSize.width + 20.0f)
             continue;
 
-        float y = evt.player2 ? p2Y : p1Y;
-        ccColor3B color = getActionColor(evt.down);
-        bool selected = timeline->isEventSelected(i);
+        const float y = evt.player2 ? p2Y : p1Y;
+        const ccColor3B color = getActionColor(evt.down);
+        const bool selected = timeline->isEventSelected(i);
 
         auto* marker = CCDrawNode::create();
+
         marker->drawRect(
-            CCRectMake(
-                x - (selected ? 6.0f : 4.0f),
-                y - renderState.eventHeight / 2.0f,
-                selected ? 12.0f : 8.0f,
-                renderState.eventHeight
-            ),
+            CCRectMake(x - 0.75f, y - 11.0f, 1.5f, 22.0f),
             ccc4f(
                 static_cast<float>(color.r) / 255.0f,
                 static_cast<float>(color.g) / 255.0f,
                 static_cast<float>(color.b) / 255.0f,
-                selected ? 1.0f : 0.78f
+                selected ? 0.72f : 0.28f
             ),
             0.0f,
             ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
+
+        marker->drawCircle(
+            {x, y},
+            selected ? 7.0f : 5.0f,
+            ccc4f(
+                static_cast<float>(color.r) / 255.0f,
+                static_cast<float>(color.g) / 255.0f,
+                static_cast<float>(color.b) / 255.0f,
+                selected ? 1.0f : 0.86f
+            ),
+            selected ? 2.0f : 0.0f,
+            ccc4f(1.0f, 1.0f, 1.0f, selected ? 0.82f : 0.0f),
+            16
+        );
+
+        if (!evt.down) {
+            marker->drawCircle(
+                {x, y},
+                3.0f,
+                ccc4f(10.0f / 255.0f, 12.0f / 255.0f, 17.0f / 255.0f, 0.95f),
+                1.0f,
+                ccc4f(
+                    static_cast<float>(color.r) / 255.0f,
+                    static_cast<float>(color.g) / 255.0f,
+                    static_cast<float>(color.b) / 255.0f,
+                    0.95f
+                ),
+                16
+            );
+        }
+
         marker->setZOrder(selected ? 20 : 10);
         eventsLayer->addChild(marker);
 
-        auto* frame = CCLabelBMFont::create(
-            std::to_string(evt.frame).c_str(),
-            "chatFont.fnt"
-        );
-        frame->setScale(0.22f);
-        frame->setAnchorPoint({0.5f, 1.0f});
-        frame->setPosition({x, y - renderState.eventHeight * 0.65f});
-        frame->setOpacity(160);
-        frame->setZOrder(12);
-        eventsLayer->addChild(frame);
+        if (selected) {
+            auto* time = CCLabelBMFont::create(
+                formatTime(evt.frame, evt.subframe).c_str(),
+                "chatFont.fnt"
+            );
+            time->setScale(0.29f);
+            time->setAnchorPoint({0.0f, 0.5f});
+            time->setPosition({
+                std::max(labelStartX, x + 10.0f),
+                y + 12.0f
+            });
+            time->setOpacity(235);
+            time->setZOrder(25);
+            eventsLayer->addChild(time);
+
+            auto* action = CCLabelBMFont::create(
+                fmt::format(
+                    "{} {}",
+                    evt.down ? "PRESS" : "RELEASE",
+                    evt.button == 1 ? "JUMP" :
+                    evt.button == 2 ? "LEFT" :
+                    evt.button == 3 ? "RIGHT" : "?"
+                ).c_str(),
+                "chatFont.fnt"
+            );
+            action->setScale(0.24f);
+            action->setAnchorPoint({0.0f, 0.5f});
+            action->setPosition({
+                std::max(labelStartX, x + 10.0f),
+                y - 12.0f
+            });
+            action->setOpacity(165);
+            action->setZOrder(25);
+            eventsLayer->addChild(action);
+        }
     }
 }
 
 void MacroTimelineLayer::renderRuler() {
     rulerLayer->removeAllChildren();
 
-    // Draw frame numbers
-    int frameStep = 60;  // Draw numbers every 60 frames
+    const float ppf = std::max(0.5f, renderState.pixelsPerFrame);
 
-    for (int f = renderState.firstVisibleFrame; f <= renderState.lastVisibleFrame; f += frameStep) {
-        float x = frameToPixels(f);
+    const int frameStep =
+        ppf >= 10.0f ? 5 :
+        ppf >= 6.0f ? 10 :
+        ppf >= 3.0f ? 20 :
+        ppf >= 1.5f ? 30 : 60;
 
-        if (x < 0.0f || x > renderState.timelineSize.width) continue;
+    const int minorStep = std::max(1, frameStep / 5);
+    const int first =
+        (renderState.firstVisibleFrame / minorStep) * minorStep;
 
-        auto* tick = CCDrawNode::create();
-        tick->drawRect(
-            CCRectMake(x - 0.5f, 4.0f, 1.0f, 14.0f),
-            ccc4f(0.78f, 0.78f, 0.78f, 0.75f),
+    auto* ticks = CCDrawNode::create();
+
+    for (int frame = first;
+         frame <= renderState.lastVisibleFrame;
+         frame += minorStep) {
+        const float x = frameToPixels(frame);
+        if (x < -2.0f || x > renderState.timelineSize.width + 2.0f)
+            continue;
+
+        const bool major = frame % frameStep == 0;
+
+        ticks->drawRect(
+            CCRectMake(
+                x - (major ? 0.75f : 0.5f),
+                major ? 0.0f : 10.0f,
+                major ? 1.5f : 1.0f,
+                major ? 24.0f : 10.0f
+            ),
+            ccc4f(
+                major ? 0.74f : 0.38f,
+                major ? 0.77f : 0.41f,
+                major ? 0.84f : 0.45f,
+                major ? 0.78f : 0.32f
+            ),
             0.0f,
             ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
         );
-        rulerLayer->addChild(tick);
 
-        // Draw label
-        CCLabelBMFont* label = CCLabelBMFont::create(
-            std::to_string(f).c_str(),
-            "chatFont.fnt"
-        );
-        label->setScale(0.3f);
-        label->setAnchorPoint({0.5f, 1});
-        label->setPosition({x, 20});
-        label->setColor({200, 200, 200});
-        rulerLayer->addChild(label);
+        if (major) {
+            auto* label = CCLabelBMFont::create(
+                std::to_string(frame).c_str(),
+                "chatFont.fnt"
+            );
+            label->setScale(0.29f);
+            label->setAnchorPoint({0.5f, 0.5f});
+            label->setPosition({x, 20.0f});
+            label->setOpacity(215);
+            rulerLayer->addChild(label);
+        }
     }
+
+    rulerLayer->addChild(ticks, 0);
+
+    auto* baseline = CCDrawNode::create();
+    baseline->drawRect(
+        CCRectMake(0.0f, 0.0f, renderState.timelineSize.width, 1.0f),
+        ccc4f(0.45f, 0.52f, 0.64f, 0.42f),
+        0.0f,
+        ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+    );
+    rulerLayer->addChild(baseline, 20);
 }
 
 void MacroTimelineLayer::renderPlayhead() {
@@ -2602,24 +2794,34 @@ void MacroTimelineLayer::renderInspector() {
 }
 
 void MacroTimelineLayer::updateFrameCounter() {
-    int frame = timeline->getPlayheadFrame();
-    frameCounterLabel->setString(fmt::format("Frame: {}", frame).c_str());
+    const int frame = timeline->getPlayheadFrame();
+    const int percent =
+        std::clamp(static_cast<int>(timeline->getPlayheadSubframe() * 100.0), 0, 99);
+
+    frameCounterLabel->setString(
+        fmt::format("FRAME {:04}", std::max(0, frame)).c_str()
+    );
+
+    subframeLabel->setString(
+        fmt::format("SUB {:02}%", percent).c_str()
+    );
 
     if (timelineInfoLabel) {
         timelineInfoLabel->setString(
             fmt::format(
-                "{} inputs | {} selected | Left/Right: frame | Up/Down: subframe | CBF {}",
+                "{} INPUTS  |  {}  |  {}",
                 timeline->getEventCount(),
-                timeline->getSelectedEventIndex() >= 0 ? 1 : 0,
-                timeline->isCBFModeEnabled() ? "ON" : "OFF"
+                timeline->isCBFModeEnabled() ? "CBF ON" : "CBF OFF",
+                timeline->getSelectedEventIndex() >= 0 ? "SELECTED" : "NO SELECTION"
             ).c_str()
         );
 
-        // Never let the hint line run under the toolbar / off-screen.
-        float maxWidth = timelineLayer ? timelineLayer->getContentSize().width - 36.0f : 400.0f;
-        float natural = timelineInfoLabel->getContentSize().width;
+        const float maxWidth =
+            timelineLayer ? timelineLayer->getContentSize().width - 185.0f : 300.0f;
+        const float natural = timelineInfoLabel->getContentSize().width;
+
         if (natural > 0.0f)
-            timelineInfoLabel->setScale(std::min(0.34f, maxWidth / natural));
+            timelineInfoLabel->setScale(std::min(0.31f, maxWidth / natural));
     }
 }
 
@@ -2713,7 +2915,7 @@ bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
     if (!timeline) return true;
 
     const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
-    int eventIdx = hitTestEvent(eventPos);
+    const int eventIdx = hitTestEvent(eventPos);
     if (eventIdx >= 0) {
         timeline->selectEvent(eventIdx);
         inputState.isDragging = true;
@@ -2723,30 +2925,79 @@ bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
         return true;
     }
 
-    // Clicking the timeline ruler moves the playhead.
     const CCPoint timelinePos = timelineLayer->convertToNodeSpace(touch->getLocation());
-    if (timelinePos.x >= 0.0f && timelinePos.x <= renderState.timelineSize.width &&
-        timelinePos.y >= 0.0f && timelinePos.y <= renderState.timelineSize.height) {
+    const bool insideTimeline =
+        timelinePos.x >= 0.0f &&
+        timelinePos.x <= renderState.timelineSize.width &&
+        timelinePos.y >= 20.0f &&
+        timelinePos.y <= renderState.timelineSize.height;
+
+    if (!insideTimeline)
+        return true;
+
+    // Ruler clicks seek. Empty track space pans horizontally.
+    if (timelinePos.y >= renderState.timelineSize.height - renderState.rulerHeight) {
         timeline->setPlayheadPrecise(
-            (timelinePos.x + timeline->getScrollOffset()) / renderState.pixelsPerFrame
+            (timelinePos.x + timeline->getScrollOffset()) /
+            renderState.pixelsPerFrame
         );
         return true;
     }
+
+    inputState.isDragging = true;
+    inputState.draggedEventIdx = -2;
+    inputState.dragStartX = timelinePos.x;
+    inputState.dragStartPreciseFrame =
+        static_cast<double>(timeline->getScrollOffset());
 
     return true;
 }
 
 void MacroTimelineLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
     FLAlertLayer::ccTouchMoved(touch, event);
-    if (!inputState.isDragging || inputState.draggedEventIdx < 0) return;
+
+    if (!inputState.isDragging)
+        return;
+
+    if (inputState.draggedEventIdx == -2) {
+        const CCPoint pos = timelineLayer->convertToNodeSpace(touch->getLocation());
+        const float delta = pos.x - inputState.dragStartX;
+
+        timeline->setScrollOffset(
+            std::max(
+                0,
+                static_cast<int>(
+                    inputState.dragStartPreciseFrame - delta
+                )
+            )
+        );
+        return;
+    }
+
+    if (inputState.draggedEventIdx < 0)
+        return;
 
     const CCPoint pos = eventsLayer->convertToNodeSpace(touch->getLocation());
-    double precise = (pos.x + timeline->getScrollOffset()) / renderState.pixelsPerFrame;
+    double precise =
+        (pos.x + timeline->getScrollOffset()) /
+        renderState.pixelsPerFrame;
 
-    if (precise < 0.0) precise = 0.0;
-    timeline->setEventFrame(inputState.draggedEventIdx, static_cast<int>(precise));
-    if (timeline->isCBFModeEnabled())
-        timeline->setEventSubframe(inputState.draggedEventIdx, precise - std::floor(precise));
+    if (precise < 0.0)
+        precise = 0.0;
+
+    if (const auto* evt = timeline->getEvent(inputState.draggedEventIdx)) {
+        timeline->setEventFrame(
+            inputState.draggedEventIdx,
+            static_cast<int>(std::floor(precise))
+        );
+
+        if (timeline->isCBFModeEnabled()) {
+            timeline->setEventSubframe(
+                inputState.draggedEventIdx,
+                precise - std::floor(precise)
+            );
+        }
+    }
 }
 
 void MacroTimelineLayer::ccTouchEnded(CCTouch* touch, CCEvent* event) {
@@ -2769,18 +3020,20 @@ int MacroTimelineLayer::hitTestEvent(const CCPoint& pos) {
 CCPoint MacroTimelineLayer::getEventRenderPos(int eventIndex) {
     if (eventIndex < 0 || eventIndex >= timeline->getEventCount()) return {0, 0};
 
-    const auto& evt = timeline->getEvent(eventIndex);
+    const auto* evt = timeline->getEvent(eventIndex);
     if (!evt) return {0, 0};
 
-    float x = frameToPixels(evt->frame, evt->subframe);
-    float y = evt->player2 ? 50.0f : 10.0f;
+    const float x = frameToPixels(evt->frame, evt->subframe);
+    const float y = evt->player2
+        ? renderState.trackHeight * 0.5f
+        : renderState.trackHeight * 1.5f;
 
     return {x, y};
 }
 
 CCRect MacroTimelineLayer::getEventRenderRect(int eventIndex) {
-    auto pos = getEventRenderPos(eventIndex);
-    return CCRectMake(pos.x - 3, pos.y - 8, 6, 16);
+    const auto pos = getEventRenderPos(eventIndex);
+    return CCRectMake(pos.x - 9.0f, pos.y - 10.0f, 18.0f, 20.0f);
 }
 
 float MacroTimelineLayer::frameToPixels(int frame, double subframe) const {
@@ -2833,11 +3086,49 @@ void MacroTimelineLayer::ensureEventVisible(int eventIndex) {
 }
 
 void MacroTimelineLayer::updateScrollBounds() {
-    // Ensure playhead is visible during playback
-    float playheadX = frameToPixels(timeline->getPlayheadFrame(), timeline->getPlayheadSubframe());
-    if (playheadX < 0 || playheadX > renderState.timelineSize.width) {
-        timeline->setScrollOffset((int)(playheadX - renderState.timelineSize.width / 2));
+    const float ppf = std::max(0.5f, renderState.pixelsPerFrame);
+
+    float contentFrames = 180.0f;
+    if (macro && !macro->inputs.empty()) {
+        contentFrames = std::max(
+            contentFrames,
+            static_cast<float>(macro->inputs.back().getPreciseFrame()) + 48.0f
+        );
     }
+
+    const int maxScroll = std::max(
+        0,
+        static_cast<int>(
+            std::ceil(
+                contentFrames * ppf -
+                renderState.timelineSize.width +
+                24.0f
+            )
+        )
+    );
+
+    int scroll = std::clamp(timeline->getScrollOffset(), 0, maxScroll);
+
+    const float playheadX = frameToPixels(
+        timeline->getPlayheadFrame(),
+        timeline->getPlayheadSubframe()
+    );
+
+    if (playheadX < 40.0f || playheadX > renderState.timelineSize.width - 40.0f) {
+        const double precise =
+            static_cast<double>(timeline->getPlayheadFrame()) +
+            timeline->getPlayheadSubframe();
+
+        scroll = std::clamp(
+            static_cast<int>(
+                precise * ppf - renderState.timelineSize.width * 0.5f
+            ),
+            0,
+            maxScroll
+        );
+    }
+
+    timeline->setScrollOffset(scroll);
 }
 
 void MacroTimelineLayer::updateInspectorPanel() {
