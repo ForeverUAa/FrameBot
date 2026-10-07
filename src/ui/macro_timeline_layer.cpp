@@ -587,7 +587,7 @@ namespace {
                     actions[i].callback
                 );
                 float const width = sprites[i]->getContentSize().width * scale;
-                item->setPosition({x + width / 2.0f, 53});
+                item->setPosition({x + width / 2.0f, 20});
                 m_actionMenu->addChild(item);
                 x += width + gap;
             }
