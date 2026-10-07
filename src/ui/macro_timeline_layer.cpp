@@ -1191,12 +1191,47 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     return nullptr;
 }
 
-MacroTimelineLayer::~MacroTimelineLayer() {}
+void MacroTimelineLayer::restorePauseMenu() {
+    if (!pauseMenuWasVisible || !hiddenPauseLayer)
+        return;
+
+    auto* pl = PlayLayer::get();
+
+    if (gameWasPaused && pl && !pl->m_isPaused)
+        pl->pauseGame(true);
+
+    if (hiddenPauseLayer)
+        hiddenPauseLayer->setVisible(true);
+
+    pauseMenuWasVisible = false;
+}
+
+MacroTimelineLayer::~MacroTimelineLayer() {
+    restorePauseMenu();
+}
 
 bool MacroTimelineLayer::setup(Macro* setupMacro) {
     macro = setupMacro;
 
     this->setTitle("Macro Timeline");
+
+    // The timeline is opened from the pause menu, but it is an in-game overlay.
+    // Temporarily hide the pause layer and resume the level so the player remains controllable.
+    if (auto* pause = Global::getPauseLayer()) {
+        hiddenPauseLayer = pause;
+        pauseMenuWasVisible = pause->isVisible();
+
+        if (auto* pl = PlayLayer::get())
+            gameWasPaused = pl->m_isPaused;
+
+        if (pauseMenuWasVisible)
+            pause->setVisible(false);
+
+        if (gameWasPaused) {
+            if (auto* pl = PlayLayer::get())
+                pl->pauseGame(false);
+        }
+    }
 
     // A popup's m_mainLayer has its origin at the popup's bottom-left, not the screen
     // centre, and this overlay is wider than the popup it was created from. Lay everything
@@ -1232,6 +1267,7 @@ bool MacroTimelineLayer::setup(Macro* setupMacro) {
 }
 
 void MacroTimelineLayer::keyBackClicked() {
+    restorePauseMenu();
     this->onClose(nullptr);
 }
 

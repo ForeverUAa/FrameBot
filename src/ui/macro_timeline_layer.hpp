@@ -62,6 +62,10 @@ private:
     CCMenuItemSpriteExtra* zoomOutBtn = nullptr;
     bool toolbarPlaying = false;
 
+    PauseLayer* hiddenPauseLayer = nullptr;
+    bool pauseMenuWasVisible = false;
+    bool gameWasPaused = false;
+
     // Timeline rendering state
     struct RenderState {
         float pixelsPerFrame = 4.0f;     // Pixels per frame (affected by zoom)
@@ -146,6 +150,8 @@ private:
 
     // Schedule updates
     void scheduleUpdate();
+
+    void restorePauseMenu();
 
     // Cleanup
     ~MacroTimelineLayer() override;
