@@ -230,24 +230,25 @@ namespace {
             fake->m_collisionLogRight = right;
         }
 
-        void releaseFakeCollections() {
-            auto release = [](CCObject*& object) {
-                if (object) {
-                    object->release();
-                    object = nullptr;
-                }
-            };
+        template <typename T>
+        static void releaseObject(T*& object) {
+            if (object) {
+                object->release();
+                object = nullptr;
+            }
+        }
 
-            release(reinterpret_cast<CCObject*&>(m_fakeTouchingRingsP1));
-            release(reinterpret_cast<CCObject*&>(m_fakeTouchingRingsP2));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogTopP1));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogBottomP1));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogLeftP1));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogRightP1));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogTopP2));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogBottomP2));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogLeftP2));
-            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogRightP2));
+        void releaseFakeCollections() {
+            releaseObject(m_fakeTouchingRingsP1);
+            releaseObject(m_fakeTouchingRingsP2);
+            releaseObject(m_fakeCollisionLogTopP1);
+            releaseObject(m_fakeCollisionLogBottomP1);
+            releaseObject(m_fakeCollisionLogLeftP1);
+            releaseObject(m_fakeCollisionLogRightP1);
+            releaseObject(m_fakeCollisionLogTopP2);
+            releaseObject(m_fakeCollisionLogBottomP2);
+            releaseObject(m_fakeCollisionLogLeftP2);
+            releaseObject(m_fakeCollisionLogRightP2);
         }
 
         PlayerObject* createFakePlayer(const char* id) {
