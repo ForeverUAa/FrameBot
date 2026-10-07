@@ -1081,7 +1081,7 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
     ret->inspector = std::make_unique<MacroEventInspector>(ret->timeline.get());
 
     auto win = CCDirector::sharedDirector()->getWinSize();
-    float width = std::max(900.0f, win.width - 24.0f);
+    float width = win.width - 24.0f;
 
     if (ret->initAnchored(width, 235.0f, macro, Utils::getTexture().c_str())) {
         // This is an in-game overlay, not a conventional popup.
@@ -1136,61 +1136,71 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
 
 void MacroTimelineLayer::initToolbar() {
     auto win = CCDirector::sharedDirector()->getWinSize();
-    float width = std::max(900.0f, win.width - 24.0f);
+    float width = win.width - 24.0f;
 
     toolbarMenu = CCMenu::create();
     toolbarMenu->setPosition({0.0f, 18.0f});
     toolbarMenu->setZOrder(100);
     m_mainLayer->addChild(toolbarMenu);
 
-    auto addButton = [&](const char* text, float x, SEL_MenuHandler cb, float scale = 0.50f) {
-        auto* sprite = ButtonSprite::create(text);
-        sprite->setScale(scale);
-        auto* item = CCMenuItemSpriteExtra::create(sprite, this, cb);
-        item->setPositionX(x);
-        toolbarMenu->addChild(item);
-        return item;
+    struct Entry {
+        char const* text;
+        SEL_MenuHandler cb;
+        CCMenuItemSpriteExtra** out;
+        ButtonSprite* sprite = nullptr;
     };
 
-    float x = -width * 0.27f;
-    playBtn = addButton("Play", x, menu_selector(MacroTimelineLayer::onPlayPressed));
-    pauseBtn = addButton("Pause", x + 62.0f, menu_selector(MacroTimelineLayer::onPausePressed));
-    stopBtn = addButton("Stop", x + 124.0f, menu_selector(MacroTimelineLayer::onStopPressed));
-    stepFrameBtn = addButton("Step", x + 186.0f, menu_selector(MacroTimelineLayer::onStepFramePressed));
-    cbfModeToggle = addButton("CBF", x + 248.0f, menu_selector(MacroTimelineLayer::onCBFTogglePressed));
-    zoomOutBtn = addButton("Zoom -", x + 314.0f, menu_selector(MacroTimelineLayer::onZoomOutPressed));
-    zoomInBtn = addButton("Zoom +", x + 386.0f, menu_selector(MacroTimelineLayer::onZoomInPressed));
+    CCMenuItemSpriteExtra* undoBtn = nullptr;
+    CCMenuItemSpriteExtra* redoBtn = nullptr;
+    CCMenuItemSpriteExtra* taskBtn = nullptr;
 
-    auto* undoSprite = ButtonSprite::create("Undo");
-    undoSprite->setScale(0.50f);
-    auto* undoBtn = CCMenuItemSpriteExtra::create(
-        undoSprite, this, menu_selector(MacroTimelineLayer::onUndoPressed)
-    );
-    undoBtn->setPositionX(width * 0.27f);
-    toolbarMenu->addChild(undoBtn);
+    std::vector<Entry> entries = {
+        { "Play",   menu_selector(MacroTimelineLayer::onPlayPressed),    &playBtn },
+        { "Pause",  menu_selector(MacroTimelineLayer::onPausePressed),   &pauseBtn },
+        { "Stop",   menu_selector(MacroTimelineLayer::onStopPressed),    &stopBtn },
+        { "Step",   menu_selector(MacroTimelineLayer::onStepFramePressed), &stepFrameBtn },
+        { "CBF",    menu_selector(MacroTimelineLayer::onCBFTogglePressed), &cbfModeToggle },
+        { "Zoom -", menu_selector(MacroTimelineLayer::onZoomOutPressed), &zoomOutBtn },
+        { "Zoom +", menu_selector(MacroTimelineLayer::onZoomInPressed),  &zoomInBtn },
+        { "Undo",   menu_selector(MacroTimelineLayer::onUndoPressed),    &undoBtn },
+        { "Redo",   menu_selector(MacroTimelineLayer::onRedoPressed),    &redoBtn },
+        { "Tasks",  menu_selector(MacroTimelineLayer::onTasksPressed),   &taskBtn },
+    };
 
-    auto* redoSprite = ButtonSprite::create("Redo");
-    redoSprite->setScale(0.50f);
-    auto* redoBtn = CCMenuItemSpriteExtra::create(
-        redoSprite, this, menu_selector(MacroTimelineLayer::onRedoPressed)
-    );
-    redoBtn->setPositionX(width * 0.36f);
-    toolbarMenu->addChild(redoBtn);
+    // Measure at full size, then pick one scale so the whole row fits the overlay.
+    constexpr float maxScale = 0.50f;
+    constexpr float gap = 6.0f;
+    constexpr float margin = 12.0f;
 
-    auto* taskSprite = ButtonSprite::create("Tasks");
-    taskSprite->setScale(0.50f);
-    auto* taskBtn = CCMenuItemSpriteExtra::create(
-        taskSprite, this, menu_selector(MacroTimelineLayer::onTasksPressed)
-    );
-    taskBtn->setPositionX(width * 0.45f);
+    float natural = 0.0f;
+    for (auto& e : entries) {
+        e.sprite = ButtonSprite::create(e.text);
+        natural += e.sprite->getContentSize().width;
+    }
+
+    float available = width - margin * 2.0f - gap * (entries.size() - 1);
+    float scale = std::min(maxScale, available / natural);
+
+    float total = natural * scale + gap * (entries.size() - 1);
+    float x = -total / 2.0f;
+
+    for (auto& e : entries) {
+        e.sprite->setScale(scale);
+        auto* item = CCMenuItemSpriteExtra::create(e.sprite, this, e.cb);
+        float w = e.sprite->getContentSize().width * scale;
+        item->setPositionX(x + w / 2.0f);
+        x += w + gap;
+        toolbarMenu->addChild(item);
+        *e.out = item;
+    }
+
     taskBtn->setID("tasks");
-    toolbarMenu->addChild(taskBtn);
 }
 
 void MacroTimelineLayer::initTimeline() {
     auto win = CCDirector::sharedDirector()->getWinSize();
     constexpr float bottom = -92.0f;
-    float width = std::max(900.0f, win.width - 24.0f);
+    float width = win.width - 24.0f;
 
     renderState.timelineSize = CCSizeMake(width, 96.0f);
     renderState.rulerHeight = 24.0f;
@@ -1410,6 +1420,12 @@ void MacroTimelineLayer::updateFrameCounter() {
                 timeline->isCBFModeEnabled() ? "ON" : "OFF"
             ).c_str()
         );
+
+        // Never let the hint line run under the toolbar / off-screen.
+        float maxWidth = timelineLayer ? timelineLayer->getContentSize().width - 36.0f : 400.0f;
+        float natural = timelineInfoLabel->getContentSize().width;
+        if (natural > 0.0f)
+            timelineInfoLabel->setScale(std::min(0.34f, maxWidth / natural));
     }
 }
 

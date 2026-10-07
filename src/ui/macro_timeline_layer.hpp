@@ -110,6 +110,8 @@ private:
     void onPlayerToggle(CCObject*);
     void onActionToggle(CCObject*);
     void onTasksPressed(CCObject*);
+    void onUndoPressed(CCObject*);
+    void onRedoPressed(CCObject*);
 
     // Helper functions
     std::string getButtonName(int button) const;

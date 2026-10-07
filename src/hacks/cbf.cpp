@@ -22,6 +22,9 @@ void Engine::prepare(
     Macro const& macro,
     size_t currentAction
 ) {
+    // A flag left over from a previous tick must never swallow this tick's P2 update.
+    m_p2Handled = false;
+
     if (frame == m_preparedFrame)
         return;
 
@@ -123,7 +126,7 @@ void Engine::endTick() {
     m_midStep = false;
     m_p1Split = false;
     m_p2Split = false;
-    m_p2Handled = false;
+    // m_p2Handled is deliberately kept: PlayerObject::update for P2 consumes it.
     m_rotationDelta = 0.f;
     m_shipRotAccum = 0.f;
     m_shipRotAccumP2 = 0.f;
@@ -302,6 +305,9 @@ class $modify(FrameBotPlayerObject, PlayerObject) {
         }
 
         eng->endTick();
+
+        // P2 was already advanced above; stop the game from stepping it a second time.
+        eng->m_p2Handled = (p2 != nullptr);
         return true;
     }
 

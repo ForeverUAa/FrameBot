@@ -233,7 +233,8 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
     bool cbfEnabled = g.mod->getSettingValue<bool>("cbf");
 
-    if (g.state == state::playing && cbfEnabled)
+    // Inputs on the respawn frame are skipped by handlePlaying, so CBF must not fire them either.
+    if (g.state == state::playing && cbfEnabled && Global::getCurrentFrame() != g.respawnFrame)
       cbf::Engine::get()->prepare(Global::getCurrentFrame(), g.macro, g.currentAction);
     else
       cbf::Engine::get()->reset();
