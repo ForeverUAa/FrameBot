@@ -1287,7 +1287,9 @@ void MacroTimelineLayer::initToolbar() {
     float width = win.width - 24.0f;
 
     toolbarMenu = CCMenu::create();
-    toolbarMenu->setPosition({width / 2.0f, 202.0f});
+    // overlay is centered on screen, so this menu's symmetric child positions
+    // should use the overlay origin directly.
+    toolbarMenu->setPosition({0.0f, 202.0f});
     toolbarMenu->setZOrder(100);
     overlay->addChild(toolbarMenu);
 
@@ -1356,7 +1358,9 @@ void MacroTimelineLayer::initTimeline() {
     renderState.eventHeight = 18.0f;
 
     timelineLayer = CCLayer::create();
-    timelineLayer->setPosition({0.0f, bottom});
+    // CCLayer uses its bottom-left origin, so offset it by half the timeline
+    // width to make its content centered under the overlay root.
+    timelineLayer->setPosition({-width / 2.0f, bottom});
     timelineLayer->setContentSize(renderState.timelineSize);
     timelineLayer->setZOrder(20);
     overlay->addChild(timelineLayer);
