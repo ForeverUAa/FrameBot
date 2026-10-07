@@ -1226,6 +1226,66 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
     if (popup) popup->show();
 }
 
+void MacroTimelineLayer::initInspector() {
+    auto win = CCDirector::sharedDirector()->getWinSize();
+    float width = std::min(360.0f, win.width - 36.0f);
+    float height = 128.0f;
+
+    inspectorBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+    inspectorBg->setContentSize({width, height});
+    inspectorBg->setPosition({
+        0.0f,
+        -12.0f
+    });
+    inspectorBg->setColor({0, 0, 0});
+    inspectorBg->setOpacity(180);
+    inspectorBg->setZOrder(30);
+    m_mainLayer->addChild(inspectorBg);
+
+    inspectorMenu = CCMenu::create();
+    inspectorMenu->setPosition({0.0f, 0.0f});
+    inspectorMenu->setZOrder(31);
+    m_mainLayer->addChild(inspectorMenu);
+
+    static constexpr const char* names[] = {
+        "Frame", "Subframe", "Button", "Player",
+        "Action", "Index", "Previous", "Next"
+    };
+
+    for (int i = 0; i < 8; ++i) {
+        inspectorLabels[i] = CCLabelBMFont::create(names[i], "chatFont.fnt");
+        inspectorLabels[i]->setScale(0.34f);
+        inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
+        inspectorLabels[i]->setPosition({
+            -width / 2.0f + 12.0f,
+            height / 2.0f - 16.0f - i * 14.0f
+        });
+        inspectorBg->addChild(inspectorLabels[i]);
+    }
+
+    auto addButton = [&](const char* text, float x, float y, SEL_MenuHandler callback) {
+        auto* sprite = ButtonSprite::create(text);
+        sprite->setScale(0.34f);
+        auto* item = CCMenuItemSpriteExtra::create(sprite, this, callback);
+        item->setPosition({x, y});
+        inspectorMenu->addChild(item);
+    };
+
+    float const right = width / 2.0f - 42.0f;
+    float const row0 = height / 2.0f - 16.0f;
+    float const row1 = row0 - 14.0f;
+    float const row2 = row1 - 14.0f;
+    float const row3 = row2 - 14.0f;
+
+    addButton("-", right - 42.0f, row0, menu_selector(MacroTimelineLayer::onFrameDown));
+    addButton("+", right, row0, menu_selector(MacroTimelineLayer::onFrameUp));
+    addButton("-", right - 42.0f, row1, menu_selector(MacroTimelineLayer::onSubframeDown));
+    addButton("+", right, row1, menu_selector(MacroTimelineLayer::onSubframeUp));
+    addButton("Button", right - 12.0f, row2, menu_selector(MacroTimelineLayer::onButtonCycle));
+    addButton("Player", right - 12.0f, row3, menu_selector(MacroTimelineLayer::onPlayerToggle));
+    addButton("Action", right - 12.0f, row3 - 14.0f, menu_selector(MacroTimelineLayer::onActionToggle));
+}
+
 void MacroTimelineLayer::initToolbar() {
     auto win = CCDirector::sharedDirector()->getWinSize();
     float width = win.width - 24.0f;
