@@ -483,30 +483,118 @@ namespace {
 
     protected:
         bool setup() override {
-            this->setTitle("Frame Tasks");
+            this->setTitle("FRAME ANALYZER");
+
+            // Dedicated layers keep the chrome independent from the dynamic task list.
+            auto* chrome = CCLayer::create();
+            chrome->setPosition({0, 0});
+            m_mainLayer->addChild(chrome, -1);
+
+            auto panel = [&](CCRect rect, ccColor3B color, GLubyte opacity) {
+                auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+                bg->setContentSize({rect.size.width, rect.size.height});
+                bg->setPosition(rect.origin + rect.size / 2.0f);
+                bg->setColor(color);
+                bg->setOpacity(opacity);
+                chrome->addChild(bg);
+                return bg;
+            };
+
+            panel({10, 72, 500, 168}, {18, 20, 25}, 235);
+            panel({16, 214, 488, 52}, {28, 32, 42}, 245);
+            panel({16, 78, 488, 126}, {10, 12, 16}, 210);
+            panel({16, 38, 488, 30}, {28, 32, 42}, 225);
+
+            auto* accent = CCDrawNode::create();
+            accent->drawRect(
+                CCRectMake(16, 262, 488, 2),
+                ccc4f(0.25f, 0.75f, 1.0f, 0.9f)
+            );
+            chrome->addChild(accent);
+
+            m_headerLabel = CCLabelBMFont::create("FRAME ANALYZER", "bigFont.fnt");
+            m_headerLabel->setScale(0.46f);
+            m_headerLabel->setAnchorPoint({0, 0.5f});
+            m_headerLabel->setPosition({22, 249});
+            m_mainLayer->addChild(m_headerLabel);
+
+            m_countLabel = CCLabelBMFont::create("0 TASKS", "chatFont.fnt");
+            m_countLabel->setScale(0.38f);
+            m_countLabel->setAnchorPoint({1, 0.5f});
+            m_countLabel->setPosition({496, 249});
+            m_countLabel->setOpacity(190);
+            m_mainLayer->addChild(m_countLabel);
+
+            auto* selectedCaption = CCLabelBMFont::create("SELECTED TASK", "chatFont.fnt");
+            selectedCaption->setScale(0.29f);
+            selectedCaption->setAnchorPoint({0, 0.5f});
+            selectedCaption->setPosition({24, 238});
+            selectedCaption->setOpacity(150);
+            m_mainLayer->addChild(selectedCaption);
+
+            m_selectedLabel = CCLabelBMFont::create("No task selected", "bigFont.fnt");
+            m_selectedLabel->setScale(0.43f);
+            m_selectedLabel->setAnchorPoint({0, 0.5f});
+            m_selectedLabel->setPosition({24, 224});
+            m_mainLayer->addChild(m_selectedLabel);
+
+            m_status = CCLabelBMFont::create("Ready", "chatFont.fnt");
+            m_status->setScale(0.34f);
+            m_status->setAnchorPoint({0, 0.5f});
+            m_status->setPosition({24, 89});
+            m_status->setOpacity(200);
+            m_mainLayer->addChild(m_status);
 
             m_actionMenu = CCMenu::create();
             m_actionMenu->setPosition({0, 0});
-            m_mainLayer->addChild(m_actionMenu);
+            m_mainLayer->addChild(m_actionMenu, 10);
+
+            constexpr float maxScale = 0.43f;
+            constexpr float gap = 5.0f;
+            constexpr float margin = 18.0f;
+
+            struct Action {
+                char const* text;
+                SEL_MenuHandler callback;
+            };
+
+            std::array<Action, 6> actions = {{
+                {"TEST", menu_selector(FrameTaskPopup::onTestSelected)},
+                {"ANALYZE", menu_selector(FrameTaskPopup::onAnalyze)},
+                {"STOP", menu_selector(FrameTaskPopup::onStop)},
+                {"ADD INPUT", menu_selector(FrameTaskPopup::onAddSelected)},
+                {"APPLY", menu_selector(FrameTaskPopup::onApplyWindow)},
+                {"SUBDIVIDE", menu_selector(FrameTaskPopup::onSubdivide)}
+            }};
+
+            float natural = 0.0f;
+            std::array<ButtonSprite*, actions.size()> sprites{};
+            for (size_t i = 0; i < actions.size(); ++i) {
+                sprites[i] = ButtonSprite::create(actions[i].text);
+                natural += sprites[i]->getContentSize().width;
+            }
+
+            float const available = 488.0f - margin * 2.0f - gap * (actions.size() - 1);
+            float const scale = std::min(maxScale, available / natural);
+            float const total = natural * scale + gap * (actions.size() - 1);
+            float x = 260.0f - total / 2.0f;
+
+            for (size_t i = 0; i < actions.size(); ++i) {
+                sprites[i]->setScale(scale);
+                auto* item = CCMenuItemSpriteExtra::create(
+                    sprites[i],
+                    this,
+                    actions[i].callback
+                );
+                float const width = sprites[i]->getContentSize().width * scale;
+                item->setPosition({x + width / 2.0f, 53});
+                m_actionMenu->addChild(item);
+                x += width + gap;
+            }
 
             m_list = CCMenu::create();
             m_list->setPosition({0, 0});
-            m_mainLayer->addChild(m_list);
-
-            auto addLabel = [&](const char* text, float x, float y, SEL_MenuHandler callback) {
-                auto label = CCLabelBMFont::create(text, "bigFont.fnt");
-                label->setScale(0.42f);
-                auto item = CCMenuItemLabel::create(label, this, callback);
-                item->setPosition({x, y});
-                m_actionMenu->addChild(item);
-            };
-
-            addLabel("Test", 36, 20, menu_selector(FrameTaskPopup::onTestSelected));
-            addLabel("Analyze", 100, 20, menu_selector(FrameTaskPopup::onAnalyze));
-            addLabel("Stop", 159, 20, menu_selector(FrameTaskPopup::onStop));
-            addLabel("Add Selected", 235, 20, menu_selector(FrameTaskPopup::onAddSelected));
-            addLabel("Apply", 307, 20, menu_selector(FrameTaskPopup::onApplyWindow));
-            addLabel("Subdivide", 378, 20, menu_selector(FrameTaskPopup::onSubdivide));
+            m_mainLayer->addChild(m_list, 5);
 
             auto addInput = [&](const char* placeholder, float x, CCTextInputNode*& target) {
                 auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
@@ -514,11 +602,11 @@ namespace {
                 bg->setScale(0.55f);
                 bg->setColor({0, 0, 0});
                 bg->setOpacity(90);
-                bg->setPosition({x, 52});
+                bg->setPosition({x, 53});
                 m_mainLayer->addChild(bg);
 
                 target = CCTextInputNode::create(70, 24, placeholder, "chatFont.fnt");
-                target->setPosition({x, 52});
+                target->setPosition({x, 53});
                 target->m_textField->setAnchorPoint({0.5f, 0.5f});
                 target->ignoreAnchorPointForPosition(true);
                 target->setMaxLabelScale(0.7f);
@@ -529,27 +617,23 @@ namespace {
                 target->setMaxLabelWidth(52.f);
                 target->setMaxLabelLength(8);
                 target->setDelegate(this);
-                m_mainLayer->addChild(target);
+                m_mainLayer->addChild(target, 20);
             };
 
             auto* lowLabel = CCLabelBMFont::create("Low", "chatFont.fnt");
             lowLabel->setScale(0.36f);
-            lowLabel->setPosition({335, 52});
+            lowLabel->setPosition({335, 53});
             m_mainLayer->addChild(lowLabel);
 
             auto* highLabel = CCLabelBMFont::create("High", "chatFont.fnt");
             highLabel->setScale(0.36f);
-            highLabel->setPosition({433, 52});
+            highLabel->setPosition({433, 53});
             m_mainLayer->addChild(highLabel);
 
             addInput("low", 369, m_lowInput);
             addInput("high", 467, m_highInput);
 
-            m_status = CCLabelBMFont::create("Select a task or input", "chatFont.fnt");
-            m_status->setScale(0.40f);
-            m_status->setAnchorPoint({0.0f, 0.5f});
-            m_status->setPosition({18, 52});
-            m_mainLayer->addChild(m_status);
+
 
             // Fake-player physics analysis is disabled for stability.
             // The live replay path remains the source of truth.
@@ -608,9 +692,28 @@ namespace {
             if (m_highInput)
                 m_highInput->setString(std::to_string(high).c_str());
 
-            m_status->setString(
-                fmt::format("Selected input {} | window {}..{}", index + 1, low, high).c_str()
-            );
+            if (m_selectedLabel) {
+                m_selectedLabel->setString(
+                    fmt::format(
+                        "{}  @  {}  |  {}{}",
+                        index + 1,
+                        formatTime(task.frame, task.subframe),
+                        task.player2 ? "P2" : "P1",
+                        task.down ? " PRESS" : " RELEASE"
+                    ).c_str()
+                );
+            }
+
+            if (m_status) {
+                m_status->setString(
+                    task.finished
+                        ? fmt::format("Window  {} .. {}    |    {}",
+                            low,
+                            high,
+                            formatWindowKind(task.kind))
+                        : fmt::format("Ready to analyze    |    current timing {}", formatTime(task.frame, task.subframe))
+                );
+            }
         }
 
         static bool parseFrame(CCTextInputNode* node, int& value) {
@@ -776,7 +879,11 @@ namespace {
             m_selectedTaskIndex = static_cast<int>(s_tasks.size()) - 1;
             selectTask(m_selectedTaskIndex);
             refreshList();
-            m_status->setString(fmt::format("Added task at {}", formatTime(task.frame, task.subframe)).c_str());
+            if (m_status)
+                m_status->setString(
+                    fmt::format("Task added at {}    |    press Analyze to scan the window",
+                        formatTime(task.frame, task.subframe)).c_str()
+                );
         }
 
         void onSelectTask(CCObject* sender) {
@@ -844,46 +951,126 @@ namespace {
 
             m_list->removeAllChildren();
 
-            float y = 220.0f;
-            for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
+            if (m_countLabel) {
+                m_countLabel->setString(
+                    fmt::format("{} TASK{}", s_tasks.size(), s_tasks.size() == 1 ? "" : "S").c_str()
+                );
+            }
+
+            constexpr float rowHeight = 36.0f;
+            constexpr float rowLeft = 20.0f;
+            constexpr float rowWidth = 480.0f;
+            float y = 180.0f;
+
+            const int visible = std::min<int>(static_cast<int>(s_tasks.size()), 3);
+
+            for (int i = 0; i < visible; ++i) {
                 auto& task = s_tasks[i];
 
                 int successful = 0;
                 for (const auto& result : task.results)
                     successful += result.passed ? 1 : 0;
 
-                std::string resultText;
-                if (task.finished) {
-                    if (task.baselineFailed) {
-                        resultText = "  [BASELINE FAILED]";
-                    } else if (task.kind == FrameWindowKind::Impossible) {
-                        resultText = "  [X]";
-                    } else {
-                        resultText = fmt::format(
-                            "  [{}..{}] {:.0f}f",
-                            static_cast<int>(std::round(task.spanLow)),
-                            static_cast<int>(std::round(task.spanHigh)),
-                            task.windowWidth
-                        );
-                    }
-                }
+                bool const selected = i == m_selectedTaskIndex;
 
-                auto text = CCLabelBMFont::create(
-                    fmt::format("{}: {}{}", i + 1, formatTime(task.frame, task.subframe), resultText).c_str(),
+                auto* row = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+                row->setContentSize({rowWidth, rowHeight - 3.0f});
+                row->setPosition({rowLeft + rowWidth / 2.0f, y});
+                row->setColor(selected ? ccColor3B{38, 55, 72} : ccColor3B{23, 26, 32});
+                row->setOpacity(selected ? 245 : 205);
+                m_list->addChild(row, 0);
+
+                auto* num = CCLabelBMFont::create(
+                    fmt::format("{:02}", i + 1).c_str(),
+                    "bigFont.fnt"
+                );
+                num->setScale(0.36f);
+                num->setAnchorPoint({0.5f, 0.5f});
+                num->setPosition({39, y});
+                num->setOpacity(170);
+                m_list->addChild(num, 2);
+
+                auto* time = CCLabelBMFont::create(
+                    formatTime(task.frame, task.subframe).c_str(),
+                    "bigFont.fnt"
+                );
+                time->setScale(0.42f);
+                time->setAnchorPoint({0, 0.5f});
+                time->setPosition({58, y + 5});
+                m_list->addChild(time, 2);
+
+                auto* meta = CCLabelBMFont::create(
+                    fmt::format("{}{} | {}", task.player2 ? "P2" : "P1",
+                                task.down ? " PRESS" : " RELEASE",
+                                task.button == 1 ? "JUMP" :
+                                task.button == 2 ? "LEFT" :
+                                task.button == 3 ? "RIGHT" : "?").c_str(),
                     "chatFont.fnt"
                 );
-                text->setScale(0.38f);
-                text->setAnchorPoint({0, 0.5f});
-                text->setPosition({45, y});
+                meta->setScale(0.27f);
+                meta->setAnchorPoint({0, 0.5f});
+                meta->setPosition({58, y - 8});
+                meta->setOpacity(145);
+                m_list->addChild(meta, 2);
 
-                auto item = CCMenuItemLabel::create(text, this, menu_selector(FrameTaskPopup::onSelectTask));
+                std::string stateText = "WAITING";
+                if (task.finished) {
+                    if (task.baselineFailed)
+                        stateText = "FAILED";
+                    else if (task.kind == FrameWindowKind::Impossible)
+                        stateText = "IMPOSSIBLE";
+                    else
+                        stateText = fmt::format(
+                            "{}..{}",
+                            static_cast<int>(std::round(task.spanLow)),
+                            static_cast<int>(std::round(task.spanHigh))
+                        );
+                } else if (successful > 0) {
+                    stateText = fmt::format("{} PASS", successful);
+                }
+
+                auto* state = CCLabelBMFont::create(stateText.c_str(), "chatFont.fnt");
+                state->setScale(0.31f);
+                state->setAnchorPoint({1, 0.5f});
+                state->setPosition({493, y});
+                state->setOpacity(task.finished ? 225 : 150);
+                m_list->addChild(state, 2);
+
+                auto* item = CCMenuItemLabel::create(
+                    CCLabelBMFont::create("", "chatFont.fnt"),
+                    this,
+                    menu_selector(FrameTaskPopup::onSelectTask)
+                );
+                item->setContentSize({rowWidth, rowHeight});
                 item->setTag(i);
-                item->setPosition({250, y});
-                m_list->addChild(item);
+                item->setPosition({260, y});
+                m_list->addChild(item, 5);
 
-                y -= 22.0f;
-                if (y < 78.0f)
-                    break;
+                y -= rowHeight;
+            }
+
+            if (s_tasks.size() > 3) {
+                auto* more = CCLabelBMFont::create(
+                    fmt::format("+ {} more tasks", s_tasks.size() - 3).c_str(),
+                    "chatFont.fnt"
+                );
+                more->setScale(0.28f);
+                more->setAnchorPoint({0.5f, 0.5f});
+                more->setPosition({260, 66});
+                more->setOpacity(120);
+                m_list->addChild(more, 2);
+            }
+
+            if (s_tasks.empty()) {
+                auto* empty = CCLabelBMFont::create(
+                    "Select an input on the timeline to create a task",
+                    "chatFont.fnt"
+                );
+                empty->setScale(0.31f);
+                empty->setAnchorPoint({0.5f, 0.5f});
+                empty->setPosition({260, 140});
+                empty->setOpacity(120);
+                m_list->addChild(empty, 2);
             }
         }
 
@@ -1755,6 +1942,9 @@ namespace {
         CCMenu* m_actionMenu = nullptr;
         CCMenu* m_list = nullptr;
         CCLabelBMFont* m_status = nullptr;
+        CCLabelBMFont* m_headerLabel = nullptr;
+        CCLabelBMFont* m_countLabel = nullptr;
+        CCLabelBMFont* m_selectedLabel = nullptr;
 
         bool m_testing = false;
         bool m_testingAll = false;
