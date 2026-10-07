@@ -24,6 +24,7 @@ namespace {
     };
 
     struct FrameTask {
+        int eventIndex = -1;
         int frame = 0;
         double subframe = 0.0;
         int button = 1;
@@ -37,6 +38,7 @@ namespace {
         bool cbfOnly = false;
         bool recoveryMode = false;
         bool finished = false;
+        bool baselineFailed = false;
         double spanLow = 0.0;      // passing span relative to the original click, in frames
         double spanHigh = 0.0;
         double windowWidth = 0.0;  // how many frames the click can move and still pass
@@ -84,8 +86,10 @@ namespace {
                 m_list->addChild(item);
             };
 
-            addLabel("Add Selected", 90, 26, menu_selector(FrameTaskPopup::onAddSelected));
-            addLabel("Start All", 260, 26, menu_selector(FrameTaskPopup::onStartAll));
+            addLabel("Test", 52, 26, menu_selector(FrameTaskPopup::onTestSelected));
+            addLabel("Analyze", 128, 26, menu_selector(FrameTaskPopup::onAnalyze));
+            addLabel("Stop", 204, 26, menu_selector(FrameTaskPopup::onStop));
+            addLabel("Add Selected", 302, 26, menu_selector(FrameTaskPopup::onAddSelected));
             addLabel("Subdivide", 430, 26, menu_selector(FrameTaskPopup::onSubdivide));
 
             m_status = CCLabelBMFont::create("No tasks", "chatFont.fnt");
@@ -99,8 +103,61 @@ namespace {
         }
 
         void onClose(CCObject* sender) override {
-            stopTesting(true);
+            cancelTesting();
             Popup::onClose(sender);
+        }
+
+        FrameTask makeTask(int index) const {
+            FrameTask task;
+            if (!m_timeline)
+                return task;
+
+            const input* event = m_timeline->getEvent(index);
+            if (!event)
+                return task;
+
+            task.eventIndex = index;
+            task.frame = event->frame;
+            task.subframe = event->subframe;
+            task.button = event->button;
+            task.player2 = event->player2;
+            task.down = event->down;
+            return task;
+        }
+
+        void onTestSelected(CCObject*) {
+            if (m_testing || !m_timeline)
+                return;
+
+            int index = m_timeline->getSelectedEventIndex();
+            FrameTask task = makeTask(index);
+            if (task.eventIndex < 0) {
+                m_status->setString("Select an input first");
+                return;
+            }
+
+            s_tasks.clear();
+            s_tasks.push_back(task);
+            s_grid = 0;
+            startTesting(0, false);
+        }
+
+        void onAnalyze(CCObject*) {
+            if (m_testing || !m_timeline)
+                return;
+
+            generateAllTasks();
+            if (s_tasks.empty()) {
+                m_status->setString("No inputs to analyze");
+                return;
+            }
+
+            s_grid = 0;
+            startTesting(0, true);
+        }
+
+        void onStop(CCObject*) {
+            cancelTesting();
         }
 
         void onAddSelected(CCObject*) {
@@ -108,18 +165,11 @@ namespace {
                 return;
 
             int index = m_timeline->getSelectedEventIndex();
-            const input* event = m_timeline->getEvent(index);
-            if (!event)
+            FrameTask task = makeTask(index);
+            if (task.eventIndex < 0)
                 return;
 
-            FrameTask task;
-            task.frame = event->frame;
-            task.subframe = event->subframe;
-            task.button = event->button;
-            task.player2 = event->player2;
-            task.down = event->down;
             s_tasks.push_back(task);
-
             refreshList();
             m_status->setString(fmt::format("Added task at {}", formatTime(task.frame, task.subframe)).c_str());
         }
@@ -144,8 +194,11 @@ namespace {
             s_tasks.clear();
             s_tasks.reserve(events->size());
 
-            for (auto const& event : *events) {
+            for (int i = 0; i < static_cast<int>(events->size()); ++i) {
+                const auto& event = (*events)[i];
+
                 FrameTask task;
+                task.eventIndex = i;
                 task.frame = event.frame;
                 task.subframe = event.subframe;
                 task.button = event.button;
@@ -181,14 +234,7 @@ namespace {
         }
 
         void onStartAll(CCObject*) {
-            s_grid = 0; // back to the menu's Substep Divider
-            if (s_tasks.empty())
-                generateAllTasks();
-
-            if (s_tasks.empty())
-                return;
-
-            startTesting(0, true);
+            onAnalyze(nullptr);
         }
 
         void refreshList() {
@@ -207,18 +253,18 @@ namespace {
 
                 std::string resultText;
                 if (task.finished) {
-                    if (task.kind == FrameWindowKind::Impossible)
-                        resultText = task.cbfOnly
-                            ? fmt::format("  [X] CBF {:.1f}f", task.windowWidth)
-                            : "  [X]";
-                    else if (task.kind == FrameWindowKind::Disconnected)
-                        resultText = fmt::format("  [A-] {} valid", successful);
-                    else
+                    if (task.baselineFailed) {
+                        resultText = "  [BASELINE FAILED]";
+                    } else if (task.kind == FrameWindowKind::Impossible) {
+                        resultText = "  [X]";
+                    } else {
                         resultText = fmt::format(
-                            "  [{}] {:.1f}f",
-                            formatWindowKind(task.kind),
+                            "  [{}..{}] {:.0f}f",
+                            static_cast<int>(std::round(task.spanLow)),
+                            static_cast<int>(std::round(task.spanHigh)),
                             task.windowWidth
                         );
+                    }
                 }
 
                 auto text = CCLabelBMFont::create(
@@ -264,6 +310,14 @@ namespace {
         }
 
         int findTaskEvent(const Macro& macro, const FrameTask& task) const {
+            if (task.eventIndex >= 0 && task.eventIndex < static_cast<int>(macro.inputs.size())) {
+                const auto& event = macro.inputs[task.eventIndex];
+                if (event.button == task.button &&
+                    event.player2 == task.player2 &&
+                    event.down == task.down)
+                    return task.eventIndex;
+            }
+
             int best = -1;
             double bestDistance = std::numeric_limits<double>::max();
             const double precise = static_cast<double>(task.frame) + task.subframe;
@@ -402,36 +456,40 @@ namespace {
 
         void buildCandidates(const FrameTask& task) {
             m_candidates.clear();
-            int const grid = activeGrid();
+            m_earlyDone = false;
+            m_lateDone = false;
 
-            for (int offset = -8; offset <= 8; ++offset) {
-                m_candidates.push_back({
-                    std::max(0, task.frame + offset),
-                    0.0,
-                    0,
-                    0,
-                    0.0,
-                    false,
-                    false
-                });
+            m_minTestFrame = std::max(0, task.frame - m_maxShift);
+            m_maxTestFrame = task.frame + m_maxShift;
+
+            const int eventIndex = task.eventIndex;
+            if (eventIndex >= 0 && eventIndex < static_cast<int>(m_backupMacro.inputs.size())) {
+                if (eventIndex > 0)
+                    m_minTestFrame = std::max(
+                        m_minTestFrame,
+                        static_cast<int>(m_backupMacro.inputs[eventIndex - 1].frame) + 1
+                    );
+
+                if (eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()))
+                    m_maxTestFrame = std::min(
+                        m_maxTestFrame,
+                        static_cast<int>(m_backupMacro.inputs[eventIndex + 1].frame) - 1
+                    );
             }
 
-            if (task.subframe > 0.0001 ||
-                (m_timeline && m_timeline->isCBFModeEnabled())) {
-                for (int offset = -2; offset <= 2; ++offset) {
-                    for (int step = 1; step < grid; ++step) {
-                        m_candidates.push_back({
-                            std::max(0, task.frame + offset),
-                            static_cast<double>(step) / grid,
-                            0,
-                            0,
-                            0.0,
-                            false,
-                            false
-                        });
-                    }
-                }
-            }
+            // Always establish the recorded input as the known-good baseline.
+            m_candidates.push_back({
+                task.frame,
+                task.subframe,
+                0,
+                0,
+                0.0,
+                false,
+                false
+            });
+
+            m_earlyDone = m_minTestFrame >= task.frame;
+            m_lateDone = m_maxTestFrame <= task.frame;
         }
 
         void startTesting(int taskIndex, bool all) {
@@ -451,6 +509,7 @@ namespace {
             m_backupRespawnFrame = Global::get().respawnFrame;
             m_taskIndex = taskIndex;
             m_testingAll = all;
+            m_completedAll = false;
             m_testing = true;
             cbf::setDividerOverride(activeGrid());
 
@@ -463,6 +522,7 @@ namespace {
 
             auto& task = s_tasks[m_taskIndex];
             task.results.clear();
+            task.baselineFailed = false;
             task.kind = FrameWindowKind::Normal;
             task.windowCount = 0;
             task.windowLow = 0;
@@ -493,24 +553,6 @@ namespace {
             }
 
             if (m_candidateIndex >= static_cast<int>(m_candidates.size())) {
-                if (m_probeStage == ProbeStage::Primary) {
-                    buildAlternatingProbes(s_tasks[m_taskIndex]);
-                    if (!m_candidates.empty()) {
-                        m_candidateIndex = 0;
-                        beginCandidate();
-                        return;
-                    }
-                }
-
-                if (m_probeStage == ProbeStage::Alternating) {
-                    buildPairProbes(s_tasks[m_taskIndex]);
-                    if (!m_candidates.empty()) {
-                        m_candidateIndex = 0;
-                        beginCandidate();
-                        return;
-                    }
-                }
-
                 finalizeTaskWindow(s_tasks[m_taskIndex]);
                 s_tasks[m_taskIndex].finished = true;
 
@@ -519,6 +561,7 @@ namespace {
 
                     auto& nextTask = s_tasks[m_taskIndex];
                     nextTask.results.clear();
+                    nextTask.baselineFailed = false;
                     nextTask.kind = FrameWindowKind::Normal;
                     nextTask.windowCount = 0;
                     nextTask.windowLow = 0;
@@ -527,17 +570,14 @@ namespace {
                     nextTask.recoveryMode = false;
 
                     m_probeStage = ProbeStage::Primary;
-                    m_alternatingRuns.clear();
-                    m_pairRuns.clear();
-                    m_alternatingOffsets.clear();
-                    m_recoveryProbe = false;
-
+                    m_completedAll = false;
                     buildCandidates(nextTask);
                     m_candidateIndex = 0;
                     beginCandidate();
                     return;
                 }
 
+                m_completedAll = m_testingAll;
                 finishTesting();
                 return;
             }
@@ -559,94 +599,29 @@ namespace {
                 return;
             }
 
-            candidateMacro.inputs[eventIndex].frame = candidate.frame;
-            candidateMacro.inputs[eventIndex].subframe = candidate.subframe;
-
-            m_probeContextShift = candidate.contextShift;
-            m_probePairedFrame = candidate.pairedFrame;
-            m_probePairedSubframe = candidate.pairedSubframe;
-
-            const int originalTaskIndex = findTaskEvent(m_backupMacro, task);
-
-            if (m_probeStage == ProbeStage::Alternating && originalTaskIndex >= 0) {
-                const int previous =
-                    findAdjacentEvent(m_backupMacro, originalTaskIndex, true);
-
-                if (previous >= 0) {
-                    const int livePrevious = findEventNear(
-                        candidateMacro,
-                        m_backupMacro.inputs[previous],
-                        m_backupMacro.inputs[previous].getPreciseFrame()
-                    );
-
-                    if (livePrevious >= 0) {
-                        candidateMacro.inputs[livePrevious].setPreciseFrame(
-                            m_backupMacro.inputs[previous].getPreciseFrame() +
-                            m_probeContextShift
-                        );
-                    }
-                }
-            }
-
-            if (m_probeStage == ProbeStage::Pair && originalTaskIndex >= 0) {
-                const int next =
-                    findAdjacentEvent(m_backupMacro, originalTaskIndex, false);
-
-                if (next >= 0) {
-                    const int liveNext = findEventNear(
-                        candidateMacro,
-                        m_backupMacro.inputs[next],
-                        m_probePairedFrame
-                    );
-
-                    if (liveNext >= 0) {
-                        candidateMacro.inputs[liveNext].frame = m_probePairedFrame;
-                        candidateMacro.inputs[liveNext].subframe =
-                            m_probePairedSubframe;
-                    }
-                }
-            }
-
-            std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
+            candidateMacro.inputs[eventIndex].setPreciseFrame(
+                static_cast<double>(candidate.frame) + candidate.subframe
+            );
 
             const double candidatePrecise =
-                candidate.frame + candidate.subframe;
+                static_cast<double>(candidate.frame) + candidate.subframe;
 
             m_passFrame = -1;
             m_passSubframe = 0.0;
 
-            if (m_probeStage == ProbeStage::Pair) {
-                const int next = findAdjacentEvent(
-                    candidateMacro,
-                    findTaskEvent(candidateMacro, task),
-                    false
-                );
-
-                if (next >= 0) {
-                    const int boundary = findNextSamePlayer(
-                        candidateMacro,
-                        task.player2,
-                        candidateMacro.inputs[next].getPreciseFrame()
-                    );
-
-                    if (boundary >= 0) {
-                        m_passFrame = candidateMacro.inputs[boundary].frame;
-                        m_passSubframe = candidateMacro.inputs[boundary].subframe;
-                    }
+            for (const auto& input : candidateMacro.inputs) {
+                if (input.player2 == task.player2 &&
+                    input.button <= 3 &&
+                    input.getPreciseFrame() > candidatePrecise + 0.0001) {
+                    m_passFrame = input.frame;
+                    m_passSubframe = input.subframe;
+                    break;
                 }
             }
 
-            if (m_passFrame < 0) {
-                for (const auto& input : candidateMacro.inputs) {
-                    if (input.player2 == task.player2 &&
-                        input.button <= 3 &&
-                        input.getPreciseFrame() > candidatePrecise + 0.0001) {
-                        m_passFrame = input.frame;
-                        m_passSubframe = input.subframe;
-                        break;
-                    }
-                }
-            }
+            // Keep the trial bounded even for the final input in a macro.
+            if (m_passFrame < 0)
+                m_passFrame = candidate.frame + 12;
 
             auto& g = Global::get();
             g.macro = candidateMacro;
@@ -667,10 +642,10 @@ namespace {
 
             m_status->setString(
                 fmt::format(
-                    "Testing {} / {}: {}",
+                    "Testing {}/{}: frame {}",
                     m_candidateIndex + 1,
                     m_candidates.size(),
-                    formatTime(m_targetFrame, m_targetSubframe)
+                    m_targetFrame
                 ).c_str()
             );
         }
@@ -737,20 +712,84 @@ namespace {
             result.subframe = m_targetSubframe;
             result.passed = passed;
             result.position = m_targetPosition;
+
+            const int offset = result.frame - task.frame;
+
             if (m_probeStage == ProbeStage::Primary) {
                 task.results.push_back(result);
-            } else if (m_probeStage == ProbeStage::Alternating) {
-                m_alternatingRuns.push_back({
-                    m_probeContextShift,
-                    result.frame - task.frame,
-                    passed
-                });
-            } else {
-                m_pairRuns.push_back({
-                    m_probeContextShift,
-                    m_probePairedFrame - m_pairBaseFrame,
-                    passed
-                });
+
+                // The original macro timing must survive. If it does not, probing this
+                // input would only measure a broken baseline.
+                if (offset == 0 && !passed) {
+                    task.baselineFailed = true;
+                    m_candidates.clear();
+                    m_candidateIndex = 0;
+                    finalizeTaskWindow(task);
+                    task.finished = true;
+                    m_completedAll = false;
+                    finishTesting();
+                    return;
+                }
+
+                if (offset == 0) {
+                    if (!m_earlyDone)
+                        m_candidates.push_back({
+                            task.frame - 1,
+                            task.subframe,
+                            0,
+                            0,
+                            0.0,
+                            false,
+                            false
+                        });
+
+                    if (!m_lateDone)
+                        m_candidates.push_back({
+                            task.frame + 1,
+                            task.subframe,
+                            0,
+                            0,
+                            0.0,
+                            false,
+                            false
+                        });
+                } else if (offset < 0) {
+                    if (!passed) {
+                        m_earlyDone = true;
+                    } else {
+                        int nextFrame = result.frame - 1;
+                        if (nextFrame < m_minTestFrame)
+                            m_earlyDone = true;
+                        else
+                            m_candidates.push_back({
+                                nextFrame,
+                                task.subframe,
+                                0,
+                                0,
+                                0.0,
+                                false,
+                                false
+                            });
+                    }
+                } else {
+                    if (!passed) {
+                        m_lateDone = true;
+                    } else {
+                        int nextFrame = result.frame + 1;
+                        if (nextFrame > m_maxTestFrame)
+                            m_lateDone = true;
+                        else
+                            m_candidates.push_back({
+                                nextFrame,
+                                task.subframe,
+                                0,
+                                0,
+                                0.0,
+                                false,
+                                false
+                            });
+                    }
+                }
             }
 
             ++m_candidateIndex;
@@ -859,93 +898,54 @@ namespace {
         }
 
         void finalizeTaskWindow(FrameTask& task) {
-            int integerCount = 0;
-            int subframeCount = 0;
-            int first = std::numeric_limits<int>::max();
-            int last = std::numeric_limits<int>::min();
-            int previous = std::numeric_limits<int>::min();
-            bool hole = false;
+            std::vector<int> passedFrames;
+            passedFrames.reserve(task.results.size());
 
             for (const auto& result : task.results) {
-                if (!result.passed)
-                    continue;
+                if (result.passed && std::abs(result.subframe - task.subframe) < 0.0001)
+                    passedFrames.push_back(result.frame);
+            }
 
-                if (std::abs(result.subframe) < 0.0001) {
-                    ++integerCount;
-                    first = std::min(first, result.frame);
-                    last = std::max(last, result.frame);
+            std::sort(passedFrames.begin(), passedFrames.end());
+            passedFrames.erase(
+                std::unique(passedFrames.begin(), passedFrames.end()),
+                passedFrames.end()
+            );
 
-                    if (previous != std::numeric_limits<int>::min() &&
-                        result.frame > previous + 1)
+            task.tested = static_cast<int>(task.results.size());
+            task.passedCount = static_cast<int>(passedFrames.size());
+
+            if (!passedFrames.empty()) {
+                task.windowLow = passedFrames.front();
+                task.windowHigh = passedFrames.back();
+
+                bool hole = false;
+                for (size_t i = 1; i < passedFrames.size(); ++i) {
+                    if (passedFrames[i] != passedFrames[i - 1] + 1) {
                         hole = true;
-
-                    previous = result.frame;
-                } else {
-                    ++subframeCount;
-                }
-            }
-
-            // Passing span relative to where the click originally sat. The width counts the
-            // last sample too, so one passing whole frame is 1.0f and, on a 1/10 grid, a
-            // window from -1.4 to +0.3 is 1.8f.
-            {
-                double low = std::numeric_limits<double>::max();
-                double high = std::numeric_limits<double>::lowest();
-                int const grid = activeGrid();
-                int tested = 0;
-                int passed = 0;
-
-                for (const auto& result : task.results) {
-                    ++tested;
-                    if (!result.passed)
-                        continue;
-
-                    ++passed;
-                    double offset =
-                        (result.frame + result.subframe) -
-                        (task.frame + task.subframe);
-                    low = std::min(low, offset);
-                    high = std::max(high, offset);
+                        break;
+                    }
                 }
 
-                task.grid = grid;
-                task.tested = tested;
-                task.passedCount = passed;
+                task.spanLow =
+                    static_cast<double>(task.windowLow) -
+                    static_cast<double>(task.frame);
+                task.spanHigh =
+                    static_cast<double>(task.windowHigh) -
+                    static_cast<double>(task.frame);
+                task.windowWidth =
+                    static_cast<double>(task.windowHigh - task.windowLow + 1);
 
-                if (passed > 0) {
-                    double const step = subframeCount > 0 ? 1.0 / grid : 1.0;
-                    task.spanLow = low;
-                    task.spanHigh = high;
-                    task.windowWidth = (high - low) + step;
-                }
-                else {
-                    task.spanLow = task.spanHigh = task.windowWidth = 0.0;
-                }
-            }
-
-            task.windowCount = integerCount > 0 ? integerCount : subframeCount;
-            task.windowLow =
-                first == std::numeric_limits<int>::max() ? 0 : first;
-            task.windowHigh =
-                last == std::numeric_limits<int>::min() ? 0 : last;
-
-            if (integerCount == 0) {
-                task.kind = FrameWindowKind::Impossible;
-                task.cbfOnly = subframeCount > 0;
-            } else if (hole) {
-                task.kind = FrameWindowKind::Disconnected;
-            } else if (task.recoveryMode) {
-                task.kind = FrameWindowKind::Recovery;
-            } else if (hasAlternatingBehavior()) {
-                task.kind = FrameWindowKind::Alternating;
+                task.windowCount = static_cast<int>(passedFrames.size());
+                task.kind = hole
+                    ? FrameWindowKind::Disconnected
+                    : FrameWindowKind::Normal;
             } else {
-                bool shared = false;
-
-                if (hasDependentRelationship(shared))
-                    task.kind =
-                        shared ? FrameWindowKind::Shared : FrameWindowKind::Optimal;
-                else
-                    task.kind = FrameWindowKind::Normal;
+                task.windowLow = task.windowHigh = task.frame;
+                task.spanLow = task.spanHigh = 0.0;
+                task.windowWidth = 0.0;
+                task.windowCount = 0;
+                task.kind = FrameWindowKind::Impossible;
             }
 
             for (const auto& result : task.results) {
@@ -1059,6 +1059,9 @@ namespace {
                 return;
 
             auto& g = Global::get();
+            int const grid = activeGrid();
+            bool const completedAll = m_completedAll;
+
             g.macro = m_backupMacro;
             g.state = m_backupState;
             g.currentAction = m_backupCurrentAction;
@@ -1070,7 +1073,7 @@ namespace {
             m_testing = false;
             cbf::setDividerOverride(0);
 
-            if (m_testingAll) {
+            if (completedAll) {
                 for (auto& task : s_tasks)
                     task.finished = true;
             } else if (m_taskIndex >= 0 && m_taskIndex < static_cast<int>(s_tasks.size())) {
@@ -1078,32 +1081,42 @@ namespace {
             }
 
             Macro::updateTPS();
-
             refreshList();
 
             int total = 0;
             for (const auto& task : s_tasks)
-                for (const auto& result : task.results)
-                    total += result.passed ? 1 : 0;
+                total += task.passedCount;
 
-            int const grid = activeGrid();
-            std::string note = fmt::format("Finished: {} successful timings (1/{} steps)", total, grid);
+            std::string note = fmt::format(
+                "Finished: {} inputs tested, {} valid frames",
+                s_tasks.size(),
+                total
+            );
 
-            // Sub-frame timings only play back on the grid they were found on.
             if (grid != cbf::substepDivider())
-                note += fmt::format(" - set Substep Divider to {} to play them", grid);
+                note += fmt::format(" | grid 1/{}", grid);
 
             m_status->setString(note.c_str());
         }
 
-        void stopTesting(bool restore) {
+        void cancelTesting() {
             if (!m_testing)
                 return;
 
-            if (restore)
-                finishTesting();
-            else
-                m_testing = false;
+            auto& g = Global::get();
+            g.macro = m_backupMacro;
+            g.state = m_backupState;
+            g.currentAction = m_backupCurrentAction;
+            g.currentFrameFix = m_backupCurrentFrameFix;
+            g.restart = m_backupRestart;
+            g.firstAttempt = m_backupFirstAttempt;
+            g.respawnFrame = m_backupRespawnFrame;
+
+            m_testing = false;
+            cbf::setDividerOverride(0);
+            m_status->setString("Testing stopped");
+            refreshList();
+            Macro::updateTPS();
         }
 
     private:
@@ -1113,6 +1126,12 @@ namespace {
 
         bool m_testing = false;
         bool m_testingAll = false;
+        bool m_completedAll = false;
+        bool m_earlyDone = false;
+        bool m_lateDone = false;
+        int m_minTestFrame = 0;
+        int m_maxTestFrame = 0;
+        static constexpr int m_maxShift = 48;
         int m_taskIndex = -1;
         int m_candidateIndex = 0;
         int m_targetFrame = 0;
