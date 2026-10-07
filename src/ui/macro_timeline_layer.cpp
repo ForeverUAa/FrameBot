@@ -1239,11 +1239,11 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
     if (!timeline)
         return;
 
-    auto* popup = FrameTaskPopup::create(timeline.get());
-    if (!popup)
-        return;
-
-    popup->show();
+    auto* timelinePtr = timeline.get();
+    Loader::get()->queueInMainThread([timelinePtr] {
+        if (auto* popup = FrameTaskPopup::create(timelinePtr))
+            popup->show();
+    }); 
 }
 
 void MacroTimelineLayer::initInspector() {
