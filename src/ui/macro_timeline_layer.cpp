@@ -340,6 +340,10 @@ namespace {
         bool setup() override {
             this->setTitle("Frame Tasks");
 
+            m_actionMenu = CCMenu::create();
+            m_actionMenu->setPosition({0, 0});
+            m_mainLayer->addChild(m_actionMenu);
+
             m_list = CCMenu::create();
             m_list->setPosition({0, 0});
             m_mainLayer->addChild(m_list);
@@ -349,7 +353,7 @@ namespace {
                 label->setScale(0.42f);
                 auto item = CCMenuItemLabel::create(label, this, callback);
                 item->setPosition({x, y});
-                m_list->addChild(item);
+                m_actionMenu->addChild(item);
             };
 
             addLabel("Test", 36, 20, menu_selector(FrameTaskPopup::onTestSelected));
@@ -406,9 +410,21 @@ namespace {
                 m_simulator = std::make_unique<FastFrameWindowSimulator>(pl);
 
             this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
+
+            if (m_timeline) {
+                int const selected = m_timeline->getSelectedEventIndex();
+                if (selected >= 0) {
+                    s_tasks.push_back(makeTask(selected));
+                    m_selectedTaskIndex = static_cast<int>(s_tasks.size()) - 1;
+                }
+            }
+
             refreshList();
-            if (!s_tasks.empty())
+            if (m_selectedTaskIndex >= 0)
+                selectTask(m_selectedTaskIndex);
+            else if (!s_tasks.empty())
                 selectTask(0);
+
             return true;
         }
 
@@ -672,7 +688,7 @@ namespace {
 
             m_list->removeAllChildren();
 
-            float y = 248.0f;
+            float y = 220.0f;
             for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
                 auto& task = s_tasks[i];
 
@@ -1107,8 +1123,30 @@ namespace {
         }
 
         void updateTaskRunner(float) {
-            if (!m_testing)
+            if (!m_testing) {
+                if (m_timeline) {
+                    int const selected = m_timeline->getSelectedEventIndex();
+                    if (selected >= 0) {
+                        int existing = -1;
+                        for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
+                            if (s_tasks[i].eventIndex == selected) {
+                                existing = i;
+                                break;
+                            }
+                        }
+
+                        if (existing < 0) {
+                            s_tasks.push_back(makeTask(selected));
+                            existing = static_cast<int>(s_tasks.size()) - 1;
+                            refreshList();
+                        }
+
+                        if (existing >= 0 && m_selectedTaskIndex != existing)
+                            selectTask(existing);
+                    }
+                }
                 return;
+            }
 
             PlayLayer* pl = PlayLayer::get();
             if (!pl)
@@ -1683,6 +1721,7 @@ namespace {
 
     private:
         MacroTimeline* m_timeline = nullptr;
+        CCMenu* m_actionMenu = nullptr;
         CCMenu* m_list = nullptr;
         CCLabelBMFont* m_status = nullptr;
 
@@ -2236,15 +2275,24 @@ void MacroTimelineLayer::onPlayPressed(CCObject*) {
     if (!timeline || timeline->getEventCount() == 0)
         return;
 
+    auto* pl = PlayLayer::get();
     if (Global::get().state != state::playing)
         Macro::togglePlaying();
+
+    if (Global::get().state == state::playing && pl && pl->m_isPaused)
+        pl->pauseGame(false);
 
     toolbarPlaying = Global::get().state == state::playing;
 }
 
 void MacroTimelineLayer::onPausePressed(CCObject*) {
+    auto* pl = PlayLayer::get();
+
     if (Global::get().state == state::playing)
         Macro::togglePlaying();
+
+    if (pl && !pl->m_isPaused)
+        pl->pauseGame(true);
 
     toolbarPlaying = false;
 }
