@@ -51,7 +51,10 @@ void Engine::prepare(
 
     m_preparedFrame = frame;
 
-    int const divider = substepDivider();
+    int const divider =
+        s_dividerOverride > 0
+            ? s_dividerOverride
+            : (macro.subdivision > 0 ? macro.subdivision : substepDivider());
 
     for (size_t i = currentAction; i < macro.inputs.size(); ++i) {
         auto const& input = macro.inputs[i];
