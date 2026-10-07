@@ -57,12 +57,12 @@ namespace {
         bool alternating = false;
     };
 
-    class FrameTaskPopup final : public framebot::Popup<> {
+    class FrameTaskPopup final : public framebot::Popup<>, public TextInputDelegate {
     public:
         static FrameTaskPopup* create(MacroTimeline* timeline) {
             auto ret = new FrameTaskPopup();
             ret->m_timeline = timeline;
-            if (ret->initAnchored(520, 290, Utils::getTexture().c_str())) {
+            if (ret->initAnchored(520, 320, Utils::getTexture().c_str())) {
                 ret->autorelease();
                 return ret;
             }
@@ -86,25 +86,110 @@ namespace {
                 m_list->addChild(item);
             };
 
-            addLabel("Test", 52, 26, menu_selector(FrameTaskPopup::onTestSelected));
-            addLabel("Analyze", 128, 26, menu_selector(FrameTaskPopup::onAnalyze));
-            addLabel("Stop", 204, 26, menu_selector(FrameTaskPopup::onStop));
-            addLabel("Add Selected", 302, 26, menu_selector(FrameTaskPopup::onAddSelected));
-            addLabel("Subdivide", 430, 26, menu_selector(FrameTaskPopup::onSubdivide));
+            addLabel("Test", 36, 20, menu_selector(FrameTaskPopup::onTestSelected));
+            addLabel("Analyze", 100, 20, menu_selector(FrameTaskPopup::onAnalyze));
+            addLabel("Stop", 159, 20, menu_selector(FrameTaskPopup::onStop));
+            addLabel("Add Selected", 235, 20, menu_selector(FrameTaskPopup::onAddSelected));
+            addLabel("Apply", 307, 20, menu_selector(FrameTaskPopup::onApplyWindow));
+            addLabel("Subdivide", 378, 20, menu_selector(FrameTaskPopup::onSubdivide));
 
-            m_status = CCLabelBMFont::create("No tasks", "chatFont.fnt");
-            m_status->setScale(0.42f);
-            m_status->setPosition({260, 50});
+            auto addInput = [&](const char* placeholder, float x, CCTextInputNode*& target) {
+                auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+                bg->setContentSize({72, 30});
+                bg->setScale(0.55f);
+                bg->setColor({0, 0, 0});
+                bg->setOpacity(90);
+                bg->setPosition({x, 52});
+                m_mainLayer->addChild(bg);
+
+                target = CCTextInputNode::create(70, 24, placeholder, "chatFont.fnt");
+                target->setPosition({x, 52});
+                target->m_textField->setAnchorPoint({0.5f, 0.5f});
+                target->ignoreAnchorPointForPosition(true);
+                target->setMaxLabelScale(0.7f);
+                target->setMouseEnabled(true);
+                target->setTouchEnabled(true);
+                target->setContentSize({58, 20});
+                target->setAllowedChars("-0123456789");
+                target->setMaxLabelWidth(52.f);
+                target->setMaxLabelLength(8);
+                target->setDelegate(this);
+                m_mainLayer->addChild(target);
+            };
+
+            auto* lowLabel = CCLabelBMFont::create("Low", "chatFont.fnt");
+            lowLabel->setScale(0.36f);
+            lowLabel->setPosition({335, 52});
+            m_mainLayer->addChild(lowLabel);
+
+            auto* highLabel = CCLabelBMFont::create("High", "chatFont.fnt");
+            highLabel->setScale(0.36f);
+            highLabel->setPosition({433, 52});
+            m_mainLayer->addChild(highLabel);
+
+            addInput("low", 369, m_lowInput);
+            addInput("high", 467, m_highInput);
+
+            m_status = CCLabelBMFont::create("Select a task or input", "chatFont.fnt");
+            m_status->setScale(0.40f);
+            m_status->setAnchorPoint({0.0f, 0.5f});
+            m_status->setPosition({18, 52});
             m_mainLayer->addChild(m_status);
 
             this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
             refreshList();
+            if (!s_tasks.empty())
+                selectTask(0);
             return true;
         }
 
         void onClose(CCObject* sender) override {
             cancelTesting();
             Popup::onClose(sender);
+        }
+
+        void textChanged(CCTextInputNode* node) override {
+            if (node != m_lowInput && node != m_highInput)
+                return;
+        }
+
+        void selectTask(int index) {
+            if (index < 0 || index >= static_cast<int>(s_tasks.size()))
+                return;
+
+            m_selectedTaskIndex = index;
+            const auto& task = s_tasks[index];
+            const int low = task.finished ? task.windowLow : task.frame;
+            const int high = task.finished ? task.windowHigh : task.frame;
+
+            if (m_lowInput)
+                m_lowInput->setString(std::to_string(low).c_str());
+            if (m_highInput)
+                m_highInput->setString(std::to_string(high).c_str());
+
+            m_status->setString(
+                fmt::format("Selected input {} | window {}..{}", index + 1, low, high).c_str()
+            );
+        }
+
+        static bool parseFrame(CCTextInputNode* node, int& value) {
+            if (!node)
+                return false;
+
+            std::string text = node->getString();
+            if (text.empty() || text == "-")
+                return false;
+
+            try {
+                size_t consumed = 0;
+                int parsed = std::stoi(text, &consumed);
+                if (consumed != text.size())
+                    return false;
+                value = parsed;
+                return true;
+            } catch (...) {
+                return false;
+            }
         }
 
         FrameTask makeTask(int index) const {
@@ -131,17 +216,82 @@ namespace {
 
             clearMarkers();
 
-            int index = m_timeline->getSelectedEventIndex();
-            FrameTask task = makeTask(index);
-            if (task.eventIndex < 0) {
-                m_status->setString("Select an input first");
-                return;
+            FrameTask task;
+            if (m_selectedTaskIndex >= 0 && m_selectedTaskIndex < static_cast<int>(s_tasks.size())) {
+                task = s_tasks[m_selectedTaskIndex];
+            } else {
+                int index = m_timeline->getSelectedEventIndex();
+                task = makeTask(index);
+                if (task.eventIndex < 0) {
+                    m_status->setString("Select an input first");
+                    return;
+                }
             }
 
             s_tasks.clear();
             s_tasks.push_back(task);
+            m_selectedTaskIndex = 0;
             s_grid = 0;
             startTesting(0, false);
+        }
+
+        void onApplyWindow(CCObject*) {
+            if (m_testing)
+                return;
+
+            int index = m_selectedTaskIndex;
+
+            if (index < 0 || index >= static_cast<int>(s_tasks.size())) {
+                if (!m_timeline) {
+                    m_status->setString("Select an input first");
+                    return;
+                }
+
+                FrameTask task = makeTask(m_timeline->getSelectedEventIndex());
+                if (task.eventIndex < 0) {
+                    m_status->setString("Select an input first");
+                    return;
+                }
+
+                s_tasks.push_back(task);
+                index = static_cast<int>(s_tasks.size()) - 1;
+                m_selectedTaskIndex = index;
+            }
+
+            int low = 0;
+            int high = 0;
+            if (!parseFrame(m_lowInput, low) || !parseFrame(m_highInput, high)) {
+                m_status->setString("Enter valid Low and High frames");
+                return;
+            }
+
+            low = std::max(0, low);
+            high = std::max(0, high);
+
+            if (low > high) {
+                m_status->setString("Low cannot be greater than High");
+                return;
+            }
+
+            auto& task = s_tasks[index];
+            task.windowLow = low;
+            task.windowHigh = high;
+            task.spanLow = static_cast<double>(low) - task.frame;
+            task.spanHigh = static_cast<double>(high) - task.frame;
+            task.windowWidth = static_cast<double>(high - low + 1);
+            task.windowCount = high - low + 1;
+            task.tested = 0;
+            task.passedCount = task.windowCount;
+            task.results.clear();
+            task.baselineFailed = false;
+            task.kind = FrameWindowKind::Normal;
+            task.finished = true;
+
+            refreshList();
+            selectTask(index);
+            m_status->setString(
+                fmt::format("Manual window set: {}..{} ({} frames)", low, high, task.windowCount).c_str()
+            );
         }
 
         void onAnalyze(CCObject*) {
@@ -150,6 +300,7 @@ namespace {
 
             clearMarkers();
             generateAllTasks();
+            m_selectedTaskIndex = -1;
             if (s_tasks.empty()) {
                 m_status->setString("No inputs to analyze");
                 return;
@@ -181,17 +332,15 @@ namespace {
                 return;
 
             s_tasks.push_back(task);
+            m_selectedTaskIndex = static_cast<int>(s_tasks.size()) - 1;
+            selectTask(m_selectedTaskIndex);
             refreshList();
             m_status->setString(fmt::format("Added task at {}", formatTime(task.frame, task.subframe)).c_str());
         }
 
-        void onStartTask(CCObject* sender) {
+        void onSelectTask(CCObject* sender) {
             auto item = static_cast<CCNode*>(sender);
-            int index = item->getTag();
-            if (index >= 0 && index < static_cast<int>(s_tasks.size())) {
-                s_grid = 0;
-                startTesting(index, false);
-            }
+            selectTask(item->getTag());
         }
 
         void generateAllTasks() {
@@ -286,7 +435,7 @@ namespace {
                 text->setAnchorPoint({0, 0.5f});
                 text->setPosition({45, y});
 
-                auto item = CCMenuItemLabel::create(text, this, menu_selector(FrameTaskPopup::onStartTask));
+                auto item = CCMenuItemLabel::create(text, this, menu_selector(FrameTaskPopup::onSelectTask));
                 item->setTag(i);
                 item->setPosition({250, y});
                 m_list->addChild(item);
@@ -1086,6 +1235,7 @@ namespace {
                     task.finished = true;
             } else if (m_taskIndex >= 0 && m_taskIndex < static_cast<int>(s_tasks.size())) {
                 s_tasks[m_taskIndex].finished = true;
+                m_selectedTaskIndex = m_taskIndex;
             }
 
             Macro::updateTPS();
@@ -1135,6 +1285,9 @@ namespace {
         bool m_testing = false;
         bool m_testingAll = false;
         bool m_completedAll = false;
+        int m_selectedTaskIndex = -1;
+        CCTextInputNode* m_lowInput = nullptr;
+        CCTextInputNode* m_highInput = nullptr;
         bool m_earlyDone = false;
         bool m_lateDone = false;
         int m_minTestFrame = 0;
