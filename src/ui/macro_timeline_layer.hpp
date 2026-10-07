@@ -44,6 +44,7 @@ private:
     // UI Elements
     CCLabelBMFont* frameCounterLabel = nullptr;
     CCLabelBMFont* subframeLabel = nullptr;
+    CCLabelBMFont* timelineInfoLabel = nullptr;
     CCLabelBMFont* inspectorLabels[8] = {};
     CCMenu* inspectorMenu = nullptr;
     CCLabelBMFont* timeLabel = nullptr;
