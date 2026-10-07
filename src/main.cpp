@@ -233,6 +233,11 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
     bool cbfEnabled = cbf::enabled();
 
+    // A macro with saved subdivision data requires the CBF path even if the user's
+    // global toggle is off, otherwise its subframe inputs would collapse to the frame.
+    if (!cbfEnabled && g.state == state::playing && g.macro.subdivision > 0)
+      cbfEnabled = true;
+
     // Inputs on the respawn frame are skipped by handlePlaying, so CBF must not fire them either.
     if (g.state == state::playing && cbfEnabled && Global::getCurrentFrame() != g.respawnFrame)
       cbf::Engine::get()->prepare(Global::getCurrentFrame(), g.macro, g.currentAction);
