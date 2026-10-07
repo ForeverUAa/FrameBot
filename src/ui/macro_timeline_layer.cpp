@@ -98,7 +98,24 @@ namespace {
         }
 
         bool valid() const {
-            return m_pl && m_fakeP1;
+            if (!m_pl || !m_fakeP1 ||
+                !m_fakeTouchingRingsP1 ||
+                !m_fakeCollisionLogTopP1 ||
+                !m_fakeCollisionLogBottomP1 ||
+                !m_fakeCollisionLogLeftP1 ||
+                !m_fakeCollisionLogRightP1)
+                return false;
+
+            if (m_pl->m_player2 &&
+                (!m_fakeP2 ||
+                 !m_fakeTouchingRingsP2 ||
+                 !m_fakeCollisionLogTopP2 ||
+                 !m_fakeCollisionLogBottomP2 ||
+                 !m_fakeCollisionLogLeftP2 ||
+                 !m_fakeCollisionLogRightP2))
+                return false;
+
+            return true;
         }
 
         Snapshot capture(int frame) const {
