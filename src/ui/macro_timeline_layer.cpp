@@ -2840,24 +2840,59 @@ void MacroTimelineLayer::onPlayPressed(CCObject*) {
     if (!timeline || timeline->getEventCount() == 0)
         return;
 
+    auto& g = Global::get();
     auto* pl = PlayLayer::get();
-    if (Global::get().state != state::playing)
-        Macro::togglePlaying();
 
-    if (Global::get().state == state::playing && pl && pl->m_isPaused)
-        pl->pauseGame(false);
+    if (g.state == state::playing) {
+        toolbarPlaying = true;
+        if (pl && pl->m_isPaused)
+            pl->pauseGame(true);
+        return;
+    }
 
-    toolbarPlaying = Global::get().state == state::playing;
+    g.state = state::playing;
+    g.currentAction = 0;
+    g.currentFrameFix = 0;
+    g.restart = false;
+    g.firstAttempt = false;
+    g.respawnFrame = -1;
+    g.stopPlaying = false;
+    g.macro.xdBotMacro = g.macro.botInfo.name == "xdBot";
+
+    cbf::Engine::get()->reset();
+
+    if (pl) {
+        if (pl->m_levelEndAnimationStarted || pl->m_isDead)
+            pl->resetLevelFromStart();
+        else if (pl->m_isPaused)
+            pl->pauseGame(true);
+        else
+            pl->resetLevelFromStart();
+    }
+
+    Interface::updateLabels();
+    Interface::updateButtons();
+    Macro::updateTPS();
+
+    toolbarPlaying = true;
 }
 
 void MacroTimelineLayer::onPausePressed(CCObject*) {
+    auto& g = Global::get();
     auto* pl = PlayLayer::get();
 
-    if (Global::get().state == state::playing)
-        Macro::togglePlaying();
+    if (g.state == state::playing)
+        g.state = state::none;
+
+    g.restart = false;
+    cbf::Engine::get()->reset();
+    Macro::updateTPS();
 
     if (pl && !pl->m_isPaused)
-        pl->pauseGame(true);
+        pl->pauseGame(false);
+
+    Interface::updateLabels();
+    Interface::updateButtons();
 
     toolbarPlaying = false;
 }
