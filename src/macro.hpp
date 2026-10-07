@@ -96,6 +96,9 @@ public:
     // 0 means use the user's current CBF divider (legacy macros).
     int subdivision = 0;
 
+    void parseExtension(json::object_t obj) override;
+    json::object_t saveExtension() const override;
+
     static void recordAction(int frame, int button, bool player2, bool hold);
 
     static void recordFrameFix(int frame, PlayerObject* p1, PlayerObject* p2);
