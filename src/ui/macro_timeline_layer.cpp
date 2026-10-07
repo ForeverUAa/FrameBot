@@ -1198,7 +1198,7 @@ void MacroTimelineLayer::restorePauseMenu() {
     auto* pl = PlayLayer::get();
 
     if (gameWasPaused && pl && !pl->m_isPaused)
-        pl->pauseGame(true);
+        pl->pauseGame(false);
 
     if (hiddenPauseLayer)
         hiddenPauseLayer->setVisible(true);
@@ -1229,7 +1229,7 @@ bool MacroTimelineLayer::setup(Macro* setupMacro) {
 
         if (gameWasPaused) {
             if (auto* pl = PlayLayer::get())
-                pl->pauseGame(false);
+                pl->pauseGame(true);
         }
     }
 

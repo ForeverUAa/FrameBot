@@ -277,8 +277,13 @@ void RecordLayer::onEditMacro(CCObject*) {
 }
 
 void RecordLayer::onTimeline(CCObject*) {
-    if (auto* layer = MacroTimelineLayer::create(&Global::get().macro))
-        layer->show();
+    auto* layer = MacroTimelineLayer::create(&Global::get().macro);
+    if (!layer)
+        return;
+
+    // The timeline replaces the xdBot popup. Keep only the timeline visible.
+    this->onClose(nullptr);
+    layer->show();
 }
 
 void RecordLayer::toggleFPS(bool on) { // forgotten
