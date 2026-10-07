@@ -80,8 +80,12 @@ namespace {
                 return;
 
             m_fakeP1 = createFakePlayer("framebot-window-p1");
-            if (m_pl->m_player2)
+            initializeFakeCollections(m_fakeP1, false);
+
+            if (m_pl->m_player2) {
                 m_fakeP2 = createFakePlayer("framebot-window-p2");
+                initializeFakeCollections(m_fakeP2, true);
+            }
         }
 
         ~FastFrameWindowSimulator() {
@@ -89,6 +93,8 @@ namespace {
                 m_fakeP1->removeFromParentAndCleanup(true);
             if (m_fakeP2)
                 m_fakeP2->removeFromParentAndCleanup(true);
+
+            releaseFakeCollections();
         }
 
         bool valid() const {
@@ -170,6 +176,80 @@ namespace {
         PlayerObject* m_fakeP1 = nullptr;
         PlayerObject* m_fakeP2 = nullptr;
 
+        CCArray* m_fakeTouchingRingsP1 = nullptr;
+        CCArray* m_fakeTouchingRingsP2 = nullptr;
+        CCDictionary* m_fakeCollisionLogTopP1 = nullptr;
+        CCDictionary* m_fakeCollisionLogBottomP1 = nullptr;
+        CCDictionary* m_fakeCollisionLogLeftP1 = nullptr;
+        CCDictionary* m_fakeCollisionLogRightP1 = nullptr;
+        CCDictionary* m_fakeCollisionLogTopP2 = nullptr;
+        CCDictionary* m_fakeCollisionLogBottomP2 = nullptr;
+        CCDictionary* m_fakeCollisionLogLeftP2 = nullptr;
+        CCDictionary* m_fakeCollisionLogRightP2 = nullptr;
+
+        template <typename T>
+        static T* retainedCreate(T* object) {
+            if (object)
+                object->retain();
+            return object;
+        }
+
+        void initializeFakeCollections(PlayerObject* fake, bool player2) {
+            if (!fake)
+                return;
+
+            auto*& touchingRings =
+                player2 ? m_fakeTouchingRingsP2 : m_fakeTouchingRingsP1;
+            auto*& top =
+                player2 ? m_fakeCollisionLogTopP2 : m_fakeCollisionLogTopP1;
+            auto*& bottom =
+                player2 ? m_fakeCollisionLogBottomP2 : m_fakeCollisionLogBottomP1;
+            auto*& left =
+                player2 ? m_fakeCollisionLogLeftP2 : m_fakeCollisionLogLeftP1;
+            auto*& right =
+                player2 ? m_fakeCollisionLogRightP2 : m_fakeCollisionLogRightP1;
+
+            if (!touchingRings)
+                touchingRings = retainedCreate(CCArray::create());
+            if (!top)
+                top = retainedCreate(CCDictionary::create());
+            if (!bottom)
+                bottom = retainedCreate(CCDictionary::create());
+            if (!left)
+                left = retainedCreate(CCDictionary::create());
+            if (!right)
+                right = retainedCreate(CCDictionary::create());
+
+            // These containers must belong exclusively to the fake player. The
+            // practice-fix snapshot otherwise aliases the real player's arrays,
+            // which lets prediction mutate live game state.
+            fake->m_touchingRings = touchingRings;
+            fake->m_collisionLogTop = top;
+            fake->m_collisionLogBottom = bottom;
+            fake->m_collisionLogLeft = left;
+            fake->m_collisionLogRight = right;
+        }
+
+        void releaseFakeCollections() {
+            auto release = [](CCObject*& object) {
+                if (object) {
+                    object->release();
+                    object = nullptr;
+                }
+            };
+
+            release(reinterpret_cast<CCObject*&>(m_fakeTouchingRingsP1));
+            release(reinterpret_cast<CCObject*&>(m_fakeTouchingRingsP2));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogTopP1));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogBottomP1));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogLeftP1));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogRightP1));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogTopP2));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogBottomP2));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogLeftP2));
+            release(reinterpret_cast<CCObject*&>(m_fakeCollisionLogRightP2));
+        }
+
         PlayerObject* createFakePlayer(const char* id) {
             if (!m_pl->m_objectLayer)
                 return nullptr;
@@ -220,6 +300,8 @@ namespace {
 
             fake->copyAttributes(real);
             PlayerPracticeFixes::applyData(fake, data, player2, true);
+            initializeFakeCollections(fake, player2);
+
             fake->setVisible(false);
             fake->m_isDead = false;
         }
@@ -244,7 +326,7 @@ namespace {
 
             int inputIndex = 0;
             while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                   macro.inputs[inputIndex].frame <= snapshot.frame)
+                   macro.inputs[inputIndex].getPreciseFrame() <= snapshot.frame + 0.000001)
                 ++inputIndex;
 
             const float tps = std::max(1.0f, Global::getTPS());
@@ -252,9 +334,46 @@ namespace {
             const float delta = physicsDt * 60.0f;
             bool targetSeen = false;
 
+            auto advance = [&](double fraction) {
+                fraction = std::clamp(fraction, 0.0, 1.0);
+                if (fraction <= 0.0)
+                    return;
+
+                float const segmentDt =
+                    static_cast<float>(physicsDt * fraction);
+                float const segmentDelta =
+                    delta * static_cast<float>(fraction);
+
+                m_pl->m_gameState.m_totalTime += physicsDt * fraction;
+                m_pl->m_gameState.m_unkDouble3 +=
+                    (physicsDt * fraction) /
+                    std::max(0.0001f, m_pl->m_gameState.m_timeWarp);
+
+                if (m_fakeP1) {
+                    m_fakeP1->m_totalTime += physicsDt * fraction;
+                    clearCollisionLogs(m_fakeP1);
+                    m_fakeP1->update(segmentDelta);
+                    if (m_pl->checkCollisions(m_fakeP1, segmentDelta, false) == 1)
+                        m_fakeP1->m_isDead = true;
+                }
+
+                if (m_fakeP2 && m_pl->m_gameState.m_isDualMode) {
+                    m_fakeP2->m_totalTime += physicsDt * fraction;
+                    clearCollisionLogs(m_fakeP2);
+                    m_fakeP2->update(segmentDelta);
+                    if (m_pl->checkCollisions(m_fakeP2, segmentDelta, false) == 1)
+                        m_fakeP2->m_isDead = true;
+                }
+            };
+
             for (int frame = snapshot.frame + 1; frame <= passFrame; ++frame) {
+                ++m_pl->m_gameState.m_currentProgress;
+
+                double cursor = 0.0;
+
                 while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                       macro.inputs[inputIndex].frame <= frame) {
+                       macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
+                       macro.inputs[inputIndex].subframe <= 0.000001) {
                     auto event = macro.inputs[inputIndex];
                     bool player2 = event.player2;
 
@@ -265,40 +384,48 @@ namespace {
                         player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1,
                         event
                     );
-
                     ++inputIndex;
                 }
 
-                m_pl->m_gameState.m_totalTime += physicsDt;
-                m_pl->m_gameState.m_unkDouble3 +=
-                    physicsDt / std::max(0.0001f, m_pl->m_gameState.m_timeWarp);
-                ++m_pl->m_gameState.m_currentProgress;
+                while (inputIndex < static_cast<int>(macro.inputs.size()) &&
+                       macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
+                       macro.inputs[inputIndex].subframe > cursor + 0.000001 &&
+                       macro.inputs[inputIndex].subframe < 1.0) {
+                    double const fraction =
+                        std::clamp(macro.inputs[inputIndex].subframe, cursor, 1.0);
 
-                if (m_fakeP1) {
-                    m_fakeP1->m_totalTime += physicsDt;
-                    clearCollisionLogs(m_fakeP1);
-                    m_fakeP1->update(delta);
-                    if (m_pl->checkCollisions(m_fakeP1, delta, false) == 1)
-                        m_fakeP1->m_isDead = true;
+                    advance(fraction - cursor);
+                    cursor = fraction;
+
+                    while (inputIndex < static_cast<int>(macro.inputs.size()) &&
+                           macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
+                           std::abs(macro.inputs[inputIndex].subframe - cursor) < 0.000001) {
+                        auto event = macro.inputs[inputIndex];
+                        bool player2 = event.player2;
+
+                        if (Macro::flipControls())
+                            player2 = !player2;
+
+                        applyInput(
+                            player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1,
+                            event
+                        );
+                        ++inputIndex;
+                    }
                 }
 
-                if (m_fakeP2 && m_pl->m_gameState.m_isDualMode) {
-                    m_fakeP2->m_totalTime += physicsDt;
-                    clearCollisionLogs(m_fakeP2);
-                    m_fakeP2->update(delta);
-                    if (m_pl->checkCollisions(m_fakeP2, delta, false) == 1)
-                        m_fakeP2->m_isDead = true;
-                }
+                advance(1.0 - cursor);
 
-                if (!targetSeen && frame >= targetFrame) {
-                    auto* targetPlayer =
-                        task.player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1;
+                auto* targetPlayer =
+                    task.player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1;
 
-                    if (!targetPlayer)
-                        break;
-
-                    targetSeen = true;
-                    result.position = targetPlayer->getPosition();
+                if (!targetSeen &&
+                    (frame > targetFrame ||
+                     (frame == targetFrame && task.subframe <= 1.0))) {
+                    if (targetPlayer) {
+                        targetSeen = true;
+                        result.position = targetPlayer->getPosition();
+                    }
                 }
 
                 if ((m_fakeP1 && m_fakeP1->m_isDead) ||
