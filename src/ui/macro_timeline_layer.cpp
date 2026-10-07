@@ -60,7 +60,7 @@ namespace {
         static FrameTaskPopup* create(MacroTimeline* timeline) {
             auto ret = new FrameTaskPopup();
             ret->m_timeline = timeline;
-            if (ret->initAnchored(520, 400, Utils::getTexture().c_str())) {
+            if (ret->initAnchored(520, 290, Utils::getTexture().c_str())) {
                 ret->autorelease();
                 return ret;
             }
@@ -84,13 +84,13 @@ namespace {
                 m_list->addChild(item);
             };
 
-            addLabel("Add Selected", 90, 32, menu_selector(FrameTaskPopup::onAddSelected));
-            addLabel("Start All", 260, 32, menu_selector(FrameTaskPopup::onStartAll));
-            addLabel("Subdivide", 430, 32, menu_selector(FrameTaskPopup::onSubdivide));
+            addLabel("Add Selected", 90, 26, menu_selector(FrameTaskPopup::onAddSelected));
+            addLabel("Start All", 260, 26, menu_selector(FrameTaskPopup::onStartAll));
+            addLabel("Subdivide", 430, 26, menu_selector(FrameTaskPopup::onSubdivide));
 
             m_status = CCLabelBMFont::create("No tasks", "chatFont.fnt");
             m_status->setScale(0.42f);
-            m_status->setPosition({260, 65});
+            m_status->setPosition({260, 50});
             m_mainLayer->addChild(m_status);
 
             this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
@@ -197,7 +197,7 @@ namespace {
 
             m_list->removeAllChildren();
 
-            float y = 350.0f;
+            float y = 248.0f;
             for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
                 auto& task = s_tasks[i];
 
@@ -234,8 +234,8 @@ namespace {
                 item->setPosition({250, y});
                 m_list->addChild(item);
 
-                y -= 28.0f;
-                if (y < 90.0f)
+                y -= 22.0f;
+                if (y < 78.0f)
                     break;
             }
         }
@@ -1183,6 +1183,7 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
         if (ret->m_title)
             ret->m_title->setVisible(false);
 
+<<<<<<< HEAD
         // Popup::m_mainLayer uses local coordinates from (0, 0) to (width, height).
         // Keep the overlay anchored to the bottom of the screen.
         ret->m_mainLayer->setPosition({
@@ -1190,6 +1191,8 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
             0.0f
         });
 
+=======
+>>>>>>> 17d1e02 (layout fix)
         ret->autorelease();
         return ret;
     }
@@ -1204,6 +1207,18 @@ bool MacroTimelineLayer::setup(Macro* setupMacro) {
     macro = setupMacro;
 
     this->setTitle("Macro Timeline");
+
+    // A popup's m_mainLayer has its origin at the popup's bottom-left, not the screen
+    // centre, and this overlay is wider than the popup it was created from. Lay everything
+    // out under our own root, centred horizontally in screen space and sitting just above
+    // the bottom edge (content spans roughly -92 .. +27 around the root).
+    {
+        auto win = CCDirector::sharedDirector()->getWinSize();
+        overlay = CCNode::create();
+        overlay->setPosition({win.width / 2.0f, 92.0f + 8.0f});
+        this->addChild(overlay, 10);
+    }
+
     this->setKeypadEnabled(true);
     this->setTouchEnabled(true);
     this->registerWithTouchDispatcher();
@@ -1231,6 +1246,7 @@ void MacroTimelineLayer::onTasksPressed(CCObject*) {
 }
 
 void MacroTimelineLayer::initInspector() {
+<<<<<<< HEAD
     auto win = CCDirector::sharedDirector()->getWinSize();
     float width = std::min(360.0f, win.width - 36.0f);
     float height = 128.0f;
@@ -1274,10 +1290,38 @@ void MacroTimelineLayer::initInspector() {
         auto* sprite = ButtonSprite::create(text);
         sprite->setScale(0.34f);
         auto* item = CCMenuItemSpriteExtra::create(sprite, this, callback);
+=======
+    constexpr float width = 180.0f;
+    constexpr float height = 264.0f;
+
+    inspectorBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
+    inspectorBg->setContentSize({width, height});
+    inspectorBg->setAnchorPoint({1.0f, 0.0f});
+    inspectorBg->setPosition({CCDirector::sharedDirector()->getWinSize().width / 2.0f - 12.0f, 8.0f});
+    inspectorBg->setColor({30, 30, 36});
+    inspectorBg->setOpacity(235);
+    inspectorBg->setZOrder(25);
+    overlay->addChild(inspectorBg);
+
+    auto* title = CCLabelBMFont::create("Event Inspector", "bigFont.fnt");
+    title->setScale(0.40f);
+    title->setPosition({width / 2.0f, height - 20.0f});
+    inspectorBg->addChild(title);
+
+    inspectorMenu = CCMenu::create();
+    inspectorMenu->setPosition({0.0f, 0.0f});
+    inspectorBg->addChild(inspectorMenu);
+
+    auto addButton = [&](const char* text, float x, float y, SEL_MenuHandler cb) {
+        auto* label = CCLabelBMFont::create(text, "bigFont.fnt");
+        label->setScale(0.34f);
+        auto* item = CCMenuItemLabel::create(label, this, cb);
+>>>>>>> 17d1e02 (layout fix)
         item->setPosition({x, y});
         inspectorMenu->addChild(item);
     };
 
+<<<<<<< HEAD
     float const right = width / 2.0f - 42.0f;
     float const row0 = height / 2.0f - 16.0f;
     float const row1 = row0 - 14.0f;
@@ -1291,6 +1335,23 @@ void MacroTimelineLayer::initInspector() {
     addButton("Button", right - 12.0f, row2, menu_selector(MacroTimelineLayer::onButtonCycle));
     addButton("Player", right - 12.0f, row3, menu_selector(MacroTimelineLayer::onPlayerToggle));
     addButton("Action", right - 12.0f, row3 - 14.0f, menu_selector(MacroTimelineLayer::onActionToggle));
+=======
+    addButton("-", 22.0f, 214.0f, menu_selector(MacroTimelineLayer::onFrameDown));
+    addButton("+", 158.0f, 214.0f, menu_selector(MacroTimelineLayer::onFrameUp));
+    addButton("-", 22.0f, 185.0f, menu_selector(MacroTimelineLayer::onSubframeDown));
+    addButton("+", 158.0f, 185.0f, menu_selector(MacroTimelineLayer::onSubframeUp));
+    addButton("Button", 90.0f, 151.0f, menu_selector(MacroTimelineLayer::onButtonCycle));
+    addButton("Player", 47.0f, 125.0f, menu_selector(MacroTimelineLayer::onPlayerToggle));
+    addButton("Action", 133.0f, 125.0f, menu_selector(MacroTimelineLayer::onActionToggle));
+
+    for (int i = 0; i < 8; ++i) {
+        inspectorLabels[i] = CCLabelBMFont::create("", "chatFont.fnt");
+        inspectorLabels[i]->setScale(0.32f);
+        inspectorLabels[i]->setAnchorPoint({0.0f, 0.5f});
+        inspectorLabels[i]->setPosition({10.0f, 108.0f - i * 13.0f});
+        inspectorBg->addChild(inspectorLabels[i]);
+    }
+>>>>>>> 17d1e02 (layout fix)
 }
 
 void MacroTimelineLayer::initToolbar() {
@@ -1300,7 +1361,7 @@ void MacroTimelineLayer::initToolbar() {
     toolbarMenu = CCMenu::create();
     toolbarMenu->setPosition({width / 2.0f, 202.0f});
     toolbarMenu->setZOrder(100);
-    m_mainLayer->addChild(toolbarMenu);
+    overlay->addChild(toolbarMenu);
 
     struct Entry {
         char const* text;
@@ -1370,7 +1431,7 @@ void MacroTimelineLayer::initTimeline() {
     timelineLayer->setPosition({0.0f, bottom});
     timelineLayer->setContentSize(renderState.timelineSize);
     timelineLayer->setZOrder(20);
-    m_mainLayer->addChild(timelineLayer);
+    overlay->addChild(timelineLayer);
 
     auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     bg->setContentSize(renderState.timelineSize);
@@ -1400,21 +1461,36 @@ void MacroTimelineLayer::initTimeline() {
     frameCounterLabel = CCLabelBMFont::create("Frame: 0", "chatFont.fnt");
     frameCounterLabel->setScale(0.50f);
     frameCounterLabel->setAnchorPoint({0.0f, 0.5f});
+<<<<<<< HEAD
     frameCounterLabel->setPosition({16.0f, 18.0f});
     m_mainLayer->addChild(frameCounterLabel);
+=======
+    frameCounterLabel->setPosition({-width / 2.0f + 16.0f, -60.0f});
+    overlay->addChild(frameCounterLabel);
+>>>>>>> 17d1e02 (layout fix)
 
     subframeLabel = CCLabelBMFont::create("0.00", "chatFont.fnt");
     subframeLabel->setScale(0.50f);
     subframeLabel->setAnchorPoint({0.0f, 0.5f});
+<<<<<<< HEAD
     subframeLabel->setPosition({105.0f, 18.0f});
     m_mainLayer->addChild(subframeLabel);
+=======
+    subframeLabel->setPosition({-width / 2.0f + 105.0f, -60.0f});
+    overlay->addChild(subframeLabel);
+>>>>>>> 17d1e02 (layout fix)
 
     timelineInfoLabel = CCLabelBMFont::create("", "chatFont.fnt");
     timelineInfoLabel->setScale(0.34f);
     timelineInfoLabel->setAnchorPoint({0.0f, 0.5f});
     timelineInfoLabel->setOpacity(185);
+<<<<<<< HEAD
     timelineInfoLabel->setPosition({18.0f, 38.0f});
     m_mainLayer->addChild(timelineInfoLabel);
+=======
+    timelineInfoLabel->setPosition({-width / 2.0f + 18.0f, -39.0f});
+    overlay->addChild(timelineInfoLabel);
+>>>>>>> 17d1e02 (layout fix)
 }
 
 void MacroTimelineLayer::updateTimeline(float dt) {

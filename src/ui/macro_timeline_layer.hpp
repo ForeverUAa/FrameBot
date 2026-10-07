@@ -35,6 +35,7 @@ private:
 
     // UI Components
     CCMenu* timelineMenu = nullptr;
+    CCNode* overlay = nullptr;         // screen-space root for the whole overlay
     CCMenu* toolbarMenu = nullptr;
     CCLayer* timelineLayer = nullptr;
     CCLayer* rulerLayer = nullptr;     // Timeline ruler/frame counter
