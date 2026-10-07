@@ -551,9 +551,8 @@ namespace {
             m_status->setPosition({18, 52});
             m_mainLayer->addChild(m_status);
 
-            if (auto* pl = PlayLayer::get())
-                m_simulator = std::make_unique<FastFrameWindowSimulator>(pl);
-
+            // Fake-player physics analysis is disabled for stability.
+            // The live replay path remains the source of truth.
             this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
 
             if (m_timeline) {
@@ -1112,7 +1111,7 @@ namespace {
             m_taskIndex = taskIndex;
             m_testingAll = all;
             m_completedAll = false;
-            m_fastMode = s_grid == 0 && m_simulator && m_simulator->valid();
+            m_fastMode = false;
             m_testing = true;
             cbf::setDividerOverride(activeGrid());
 
@@ -1151,22 +1150,6 @@ namespace {
             g.restart = true;
             g.firstAttempt = true;
             g.respawnFrame = -1;
-
-            if (m_fastMode) {
-                m_prepareFrame = std::max(
-                    0,
-                    task.frame - m_maxShift - 2
-                );
-                pl->resetLevelFromStart();
-                m_status->setString(
-                    fmt::format(
-                        "Physics analyze {} / {}",
-                        m_taskIndex + 1,
-                        s_tasks.size()
-                    ).c_str()
-                );
-                return;
-            }
 
             beginCandidate();
         }
@@ -1310,113 +1293,6 @@ namespace {
                 return finishTesting();
 
             int frame = Global::getCurrentFrame();
-
-            if (m_fastMode) {
-                if (frame < m_prepareFrame)
-                    return;
-
-                if (m_taskIndex < 0 || m_taskIndex >= static_cast<int>(s_tasks.size()))
-                    return finishTesting();
-
-                auto& task = s_tasks[m_taskIndex];
-                auto snapshot = m_simulator->capture(frame);
-
-                int minFrame = std::max(0, task.frame - m_maxShift);
-                int maxFrame = task.frame + m_maxShift;
-
-                if (task.eventIndex > 0)
-                    minFrame = std::max(
-                        minFrame,
-                        static_cast<int>(m_backupMacro.inputs[task.eventIndex - 1].frame) + 1
-                    );
-
-                if (task.eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()))
-                    maxFrame = std::min(
-                        maxFrame,
-                        static_cast<int>(m_backupMacro.inputs[task.eventIndex + 1].frame) - 1
-                    );
-
-                if (minFrame < snapshot.frame)
-                    minFrame = snapshot.frame;
-
-                auto results = m_simulator->analyze(
-                    snapshot,
-                    m_backupMacro,
-                    task,
-                    minFrame,
-                    maxFrame
-                );
-
-                task.results.clear();
-                task.results.reserve(results.size());
-
-                bool baselinePassed = false;
-                for (const auto& result : results) {
-                    task.results.push_back({
-                        result.frame,
-                        result.subframe,
-                        result.passed,
-                        result.position
-                    });
-
-                    if (result.frame == task.frame &&
-                        std::abs(result.subframe - task.subframe) < 0.0001)
-                        baselinePassed = result.passed;
-                }
-
-                task.baselineFailed = !baselinePassed;
-                finalizeTaskWindow(task);
-                task.finished = true;
-
-                if (task.baselineFailed && m_testingAll) {
-                    m_status->setString(
-                        fmt::format(
-                            "Analyze stopped: baseline failed at {}",
-                            task.frame
-                        ).c_str()
-                    );
-                    m_completedAll = false;
-                    finishTesting();
-                    return;
-                }
-
-                if (m_testingAll &&
-                    m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
-                    ++m_taskIndex;
-
-                    auto& nextTask = s_tasks[m_taskIndex];
-                    nextTask.results.clear();
-                    nextTask.baselineFailed = false;
-                    nextTask.kind = FrameWindowKind::Normal;
-                    nextTask.windowCount = 0;
-                    nextTask.windowLow = 0;
-                    nextTask.windowHigh = 0;
-                    nextTask.windowWidth = 0.0;
-                    nextTask.spanLow = 0.0;
-                    nextTask.spanHigh = 0.0;
-                    nextTask.tested = 0;
-                    nextTask.passedCount = 0;
-                    nextTask.finished = false;
-
-                    m_prepareFrame = std::max(
-                        frame,
-                        std::max(0, nextTask.frame - m_maxShift - 2)
-                    );
-
-                    m_status->setString(
-                        fmt::format(
-                            "Physics analyze {} / {}",
-                            m_taskIndex + 1,
-                            s_tasks.size()
-                        ).c_str()
-                    );
-                    return;
-                }
-
-                m_completedAll = m_testingAll;
-                finishTesting();
-                return;
-            }
 
             if (m_attemptStartFrame == 0 && frame > 0)
                 m_attemptStartFrame = frame;
@@ -1824,7 +1700,6 @@ namespace {
 
             m_testing = false;
             m_fastMode = false;
-            m_prepareFrame = 0;
             cbf::setDividerOverride(0);
 
             if (completedAll) {
@@ -1869,7 +1744,6 @@ namespace {
 
             m_testing = false;
             m_fastMode = false;
-            m_prepareFrame = 0;
             cbf::setDividerOverride(0);
             m_status->setString("Testing stopped");
             refreshList();
@@ -1886,7 +1760,6 @@ namespace {
         bool m_testingAll = false;
         bool m_completedAll = false;
         bool m_fastMode = false;
-        int m_prepareFrame = 0;
         int m_selectedTaskIndex = -1;
         CCTextInputNode* m_lowInput = nullptr;
         CCTextInputNode* m_highInput = nullptr;
