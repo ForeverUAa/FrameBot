@@ -92,6 +92,10 @@ public:
     uintptr_t seed = 0;
     bool xdBotMacro = true;
 
+    // Subdivision grid used for CBF subframe inputs.
+    // 0 means use the user's current CBF divider (legacy macros).
+    int subdivision = 0;
+
     static void recordAction(int frame, int button, bool player2, bool hold);
 
     static void recordFrameFix(int frame, PlayerObject* p1, PlayerObject* p2);
