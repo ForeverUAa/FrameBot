@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "../hacks/cbf.hpp"
+#include "../practice_fixes/practice_fixes.hpp"
 
 
 namespace {
@@ -56,6 +57,271 @@ namespace {
         bool paired = false;
         bool alternating = false;
     };
+
+    class FastFrameWindowSimulator final {
+    public:
+        struct Snapshot {
+            GJGameState gameState;
+            PlayerData p1;
+            PlayerData p2;
+            bool hasP2 = false;
+            int frame = 0;
+        };
+
+        struct Result {
+            int frame = 0;
+            double subframe = 0.0;
+            bool passed = false;
+            CCPoint position = {0, 0};
+        };
+
+        explicit FastFrameWindowSimulator(PlayLayer* pl) : m_pl(pl) {
+            if (!m_pl)
+                return;
+
+            m_fakeP1 = createFakePlayer("framebot-window-p1");
+            if (m_pl->m_player2)
+                m_fakeP2 = createFakePlayer("framebot-window-p2");
+        }
+
+        ~FastFrameWindowSimulator() {
+            if (m_fakeP1)
+                m_fakeP1->removeFromParentAndCleanup(true);
+            if (m_fakeP2)
+                m_fakeP2->removeFromParentAndCleanup(true);
+        }
+
+        bool valid() const {
+            return m_pl && m_fakeP1;
+        }
+
+        Snapshot capture(int frame) const {
+            Snapshot snapshot;
+            snapshot.frame = frame;
+
+            if (!m_pl || !m_pl->m_player1)
+                return snapshot;
+
+            snapshot.gameState = m_pl->m_gameState;
+            snapshot.p1 = PlayerPracticeFixes::saveData(m_pl->m_player1);
+            snapshot.hasP2 = m_pl->m_player2 != nullptr;
+
+            if (snapshot.hasP2)
+                snapshot.p2 = PlayerPracticeFixes::saveData(m_pl->m_player2);
+
+            return snapshot;
+        }
+
+        std::vector<Result> analyze(
+            const Snapshot& snapshot,
+            const Macro& baseMacro,
+            const FrameTask& task,
+            int lowFrame,
+            int highFrame
+        ) {
+            std::vector<Result> results;
+            if (!valid() || lowFrame > highFrame)
+                return results;
+
+            results.reserve(static_cast<size_t>(highFrame - lowFrame + 1));
+
+            for (int candidateFrame = lowFrame;
+                 candidateFrame <= highFrame;
+                 ++candidateFrame) {
+                Macro candidateMacro = baseMacro;
+
+                if (task.eventIndex < 0 ||
+                    task.eventIndex >= static_cast<int>(candidateMacro.inputs.size()))
+                    break;
+
+                candidateMacro.inputs[task.eventIndex].frame = candidateFrame;
+                candidateMacro.inputs[task.eventIndex].subframe = task.subframe;
+                std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
+
+                int passFrame = candidateFrame + 12;
+                const double candidateTime =
+                    static_cast<double>(candidateFrame) + task.subframe;
+
+                for (const auto& event : candidateMacro.inputs) {
+                    if (event.player2 == task.player2 &&
+                        event.button <= 3 &&
+                        event.getPreciseFrame() > candidateTime + 0.0001) {
+                        passFrame = event.frame;
+                        break;
+                    }
+                }
+
+                results.push_back(simulateCandidate(
+                    snapshot,
+                    candidateMacro,
+                    task,
+                    candidateFrame,
+                    task.subframe,
+                    passFrame
+                ));
+            }
+
+            m_pl->m_gameState = snapshot.gameState;
+            return results;
+        }
+
+    private:
+        PlayLayer* m_pl = nullptr;
+        PlayerObject* m_fakeP1 = nullptr;
+        PlayerObject* m_fakeP2 = nullptr;
+
+        PlayerObject* createFakePlayer(const char* id) {
+            if (!m_pl->m_objectLayer)
+                return nullptr;
+
+            auto* player = PlayerObject::create(1, 1, m_pl, m_pl, true);
+            if (!player)
+                return nullptr;
+
+            player->setID(id);
+            player->setVisible(false);
+            m_pl->m_objectLayer->addChild(player);
+            return player;
+        }
+
+        static void clearCollisionLogs(PlayerObject* player) {
+            if (!player)
+                return;
+
+            if (player->m_collisionLogTop)
+                player->m_collisionLogTop->removeAllObjects();
+            if (player->m_collisionLogBottom)
+                player->m_collisionLogBottom->removeAllObjects();
+            if (player->m_collisionLogLeft)
+                player->m_collisionLogLeft->removeAllObjects();
+            if (player->m_collisionLogRight)
+                player->m_collisionLogRight->removeAllObjects();
+        }
+
+        static void applyInput(PlayerObject* player, const input& event) {
+            if (!player)
+                return;
+
+            const auto button = static_cast<PlayerButton>(event.button);
+            if (event.down)
+                player->pushButton(button);
+            else
+                player->releaseButton(button);
+        }
+
+        void restorePlayer(
+            PlayerObject* fake,
+            PlayerObject* real,
+            const PlayerData& data,
+            bool player2
+        ) {
+            if (!fake || !real)
+                return;
+
+            fake->copyAttributes(real);
+            PlayerPracticeFixes::applyData(fake, data, player2, true);
+            fake->setVisible(false);
+            fake->m_isDead = false;
+        }
+
+        Result simulateCandidate(
+            const Snapshot& snapshot,
+            const Macro& macro,
+            const FrameTask& task,
+            int targetFrame,
+            double targetSubframe,
+            int passFrame
+        ) {
+            Result result;
+            result.frame = targetFrame;
+            result.subframe = targetSubframe;
+
+            m_pl->m_gameState = snapshot.gameState;
+
+            restorePlayer(m_fakeP1, m_pl->m_player1, snapshot.p1, false);
+            if (snapshot.hasP2 && m_fakeP2 && m_pl->m_player2)
+                restorePlayer(m_fakeP2, m_pl->m_player2, snapshot.p2, true);
+
+            int inputIndex = 0;
+            while (inputIndex < static_cast<int>(macro.inputs.size()) &&
+                   macro.inputs[inputIndex].frame <= snapshot.frame)
+                ++inputIndex;
+
+            const float tps = std::max(1.0f, Global::getTPS());
+            const float physicsDt = 1.0f / tps;
+            const float delta = physicsDt * 60.0f;
+            bool targetSeen = false;
+
+            for (int frame = snapshot.frame + 1; frame <= passFrame; ++frame) {
+                while (inputIndex < static_cast<int>(macro.inputs.size()) &&
+                       macro.inputs[inputIndex].frame <= frame) {
+                    auto event = macro.inputs[inputIndex];
+                    bool player2 = event.player2;
+
+                    if (Macro::flipControls())
+                        player2 = !player2;
+
+                    applyInput(
+                        player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1,
+                        event
+                    );
+
+                    ++inputIndex;
+                }
+
+                m_pl->m_gameState.m_totalTime += physicsDt;
+                m_pl->m_gameState.m_unkDouble3 +=
+                    physicsDt / std::max(0.0001f, m_pl->m_gameState.m_timeWarp);
+                ++m_pl->m_gameState.m_currentProgress;
+
+                if (m_fakeP1) {
+                    m_fakeP1->m_totalTime += physicsDt;
+                    clearCollisionLogs(m_fakeP1);
+                    m_fakeP1->update(delta);
+                    if (m_pl->checkCollisions(m_fakeP1, delta, false) == 1)
+                        m_fakeP1->m_isDead = true;
+                }
+
+                if (m_fakeP2 && m_pl->m_gameState.m_isDualMode) {
+                    m_fakeP2->m_totalTime += physicsDt;
+                    clearCollisionLogs(m_fakeP2);
+                    m_fakeP2->update(delta);
+                    if (m_pl->checkCollisions(m_fakeP2, delta, false) == 1)
+                        m_fakeP2->m_isDead = true;
+                }
+
+                if (!targetSeen && frame >= targetFrame) {
+                    auto* targetPlayer =
+                        task.player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1;
+
+                    if (!targetPlayer)
+                        break;
+
+                    targetSeen = true;
+                    result.position = targetPlayer->getPosition();
+                }
+
+                if ((m_fakeP1 && m_fakeP1->m_isDead) ||
+                    (m_fakeP2 && m_pl->m_gameState.m_isDualMode &&
+                     m_fakeP2->m_isDead))
+                    return result;
+
+                if (m_pl->m_levelEndAnimationStarted) {
+                    result.passed = true;
+                    return result;
+                }
+
+                if (targetSeen && frame >= passFrame) {
+                    result.passed = true;
+                    return result;
+                }
+            }
+
+            result.passed = targetSeen;
+            return result;
+        }
+    };
+
 
     class FrameTaskPopup final : public framebot::Popup<>, public TextInputDelegate {
     public:
@@ -135,6 +401,9 @@ namespace {
             m_status->setAnchorPoint({0.0f, 0.5f});
             m_status->setPosition({18, 52});
             m_mainLayer->addChild(m_status);
+
+            if (auto* pl = PlayLayer::get())
+                m_simulator = std::make_unique<FastFrameWindowSimulator>(pl);
 
             this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
             refreshList();
@@ -670,6 +939,7 @@ namespace {
             m_taskIndex = taskIndex;
             m_testingAll = all;
             m_completedAll = false;
+            m_fastMode = s_grid == 0 && m_simulator && m_simulator->valid();
             m_testing = true;
             cbf::setDividerOverride(activeGrid());
 
@@ -699,6 +969,31 @@ namespace {
             m_candidateIndex = 0;
             m_targetSeen = false;
             m_attemptStartFrame = 0;
+
+            auto& g = Global::get();
+            g.macro = m_backupMacro;
+            g.state = state::playing;
+            g.currentAction = 0;
+            g.currentFrameFix = 0;
+            g.restart = true;
+            g.firstAttempt = true;
+            g.respawnFrame = -1;
+
+            if (m_fastMode) {
+                m_prepareFrame = std::max(
+                    0,
+                    task.frame - m_maxShift - 2
+                );
+                pl->resetLevelFromStart();
+                m_status->setString(
+                    fmt::format(
+                        "Physics analyze {} / {}",
+                        m_taskIndex + 1,
+                        s_tasks.size()
+                    ).c_str()
+                );
+                return;
+            }
 
             beginCandidate();
         }
@@ -821,11 +1116,120 @@ namespace {
 
             int frame = Global::getCurrentFrame();
 
+            if (m_fastMode) {
+                if (frame < m_prepareFrame)
+                    return;
+
+                if (m_taskIndex < 0 || m_taskIndex >= static_cast<int>(s_tasks.size()))
+                    return finishTesting();
+
+                auto& task = s_tasks[m_taskIndex];
+                auto snapshot = m_simulator->capture(frame);
+
+                int minFrame = std::max(0, task.frame - m_maxShift);
+                int maxFrame = task.frame + m_maxShift;
+
+                if (task.eventIndex > 0)
+                    minFrame = std::max(
+                        minFrame,
+                        static_cast<int>(m_backupMacro.inputs[task.eventIndex - 1].frame) + 1
+                    );
+
+                if (task.eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()))
+                    maxFrame = std::min(
+                        maxFrame,
+                        static_cast<int>(m_backupMacro.inputs[task.eventIndex + 1].frame) - 1
+                    );
+
+                if (minFrame < snapshot.frame)
+                    minFrame = snapshot.frame;
+
+                auto results = m_simulator->analyze(
+                    snapshot,
+                    m_backupMacro,
+                    task,
+                    minFrame,
+                    maxFrame
+                );
+
+                task.results.clear();
+                task.results.reserve(results.size());
+
+                bool baselinePassed = false;
+                for (const auto& result : results) {
+                    task.results.push_back({
+                        result.frame,
+                        result.subframe,
+                        result.passed,
+                        result.position
+                    });
+
+                    if (result.frame == task.frame &&
+                        std::abs(result.subframe - task.subframe) < 0.0001)
+                        baselinePassed = result.passed;
+                }
+
+                task.baselineFailed = !baselinePassed;
+                finalizeTaskWindow(task);
+                task.finished = true;
+
+                if (task.baselineFailed && m_testingAll) {
+                    m_status->setString(
+                        fmt::format(
+                            "Analyze stopped: baseline failed at {}",
+                            task.frame
+                        ).c_str()
+                    );
+                    m_completedAll = false;
+                    finishTesting();
+                    return;
+                }
+
+                if (m_testingAll &&
+                    m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
+                    ++m_taskIndex;
+
+                    auto& nextTask = s_tasks[m_taskIndex];
+                    nextTask.results.clear();
+                    nextTask.baselineFailed = false;
+                    nextTask.kind = FrameWindowKind::Normal;
+                    nextTask.windowCount = 0;
+                    nextTask.windowLow = 0;
+                    nextTask.windowHigh = 0;
+                    nextTask.windowWidth = 0.0;
+                    nextTask.spanLow = 0.0;
+                    nextTask.spanHigh = 0.0;
+                    nextTask.tested = 0;
+                    nextTask.passedCount = 0;
+                    nextTask.finished = false;
+
+                    m_prepareFrame = std::max(
+                        frame,
+                        std::max(0, nextTask.frame - m_maxShift - 2)
+                    );
+
+                    m_status->setString(
+                        fmt::format(
+                            "Physics analyze {} / {}",
+                            m_taskIndex + 1,
+                            s_tasks.size()
+                        ).c_str()
+                    );
+                    return;
+                }
+
+                m_completedAll = m_testingAll;
+                finishTesting();
+                return;
+            }
+
             if (m_attemptStartFrame == 0 && frame > 0)
                 m_attemptStartFrame = frame;
 
             if (!m_targetSeen && frame >= m_targetFrame) {
-                PlayerObject* player = s_tasks[m_taskIndex].player2 ? pl->m_player2 : pl->m_player1;
+                PlayerObject* player =
+                    s_tasks[m_taskIndex].player2 ? pl->m_player2 : pl->m_player1;
+
                 if (player) {
                     m_targetPosition = player->getPosition();
                     m_targetSeen = true;
@@ -850,10 +1254,6 @@ namespace {
                 return;
             }
 
-            // A window ends at the next macro input. Reaching that input
-            // means the player made it through the gap being tested. If this
-            // is the last input, use a small fallback lookahead because there
-            // is no later input to act as the boundary.
             const int passFrame = m_passFrame >= 0
                 ? m_passFrame
                 : m_targetFrame + 12;
@@ -1228,6 +1628,8 @@ namespace {
             g.respawnFrame = m_backupRespawnFrame;
 
             m_testing = false;
+            m_fastMode = false;
+            m_prepareFrame = 0;
             cbf::setDividerOverride(0);
 
             if (completedAll) {
@@ -1271,6 +1673,8 @@ namespace {
             g.respawnFrame = m_backupRespawnFrame;
 
             m_testing = false;
+            m_fastMode = false;
+            m_prepareFrame = 0;
             cbf::setDividerOverride(0);
             m_status->setString("Testing stopped");
             refreshList();
@@ -1285,6 +1689,8 @@ namespace {
         bool m_testing = false;
         bool m_testingAll = false;
         bool m_completedAll = false;
+        bool m_fastMode = false;
+        int m_prepareFrame = 0;
         int m_selectedTaskIndex = -1;
         CCTextInputNode* m_lowInput = nullptr;
         CCTextInputNode* m_highInput = nullptr;
@@ -1340,6 +1746,8 @@ namespace {
         double m_probePairedSubframe = 0.0;
         int m_pairBaseFrame = 0;
         bool m_recoveryProbe = false;
+
+        std::unique_ptr<FastFrameWindowSimulator> m_simulator;
 
         static inline std::vector<FrameTask> s_tasks;
         static inline int s_grid = 0;
