@@ -60,6 +60,7 @@ private:
     CCMenuItemSpriteExtra* cbfModeToggle = nullptr;
     CCMenuItemSpriteExtra* zoomInBtn = nullptr;
     CCMenuItemSpriteExtra* zoomOutBtn = nullptr;
+    bool toolbarPlaying = false;
 
     // Timeline rendering state
     struct RenderState {
