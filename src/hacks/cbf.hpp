@@ -62,6 +62,10 @@ bool canSplit(PlayerObject* player);
 
 // Menu-controlled settings (saved values, so the menu is the single source of truth).
 bool enabled();
-int substepDivider();   // sub-frame inputs snap to k / divider of a physics step
+int substepDivider();   // (returns the override while a window test is running)
+
+// Window analysis tests finer grids than the menu divider; the engine must snap to the
+// same grid or neighbouring candidates would collapse onto one another. 0 clears it.
+void setDividerOverride(int divider);   // sub-frame inputs snap to k / divider of a physics step
 
 } // namespace cbf

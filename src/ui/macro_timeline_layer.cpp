@@ -2,6 +2,8 @@
 
 #include <limits>
 
+#include "../hacks/cbf.hpp"
+
 
 namespace {
     enum class FrameWindowKind {
@@ -35,6 +37,12 @@ namespace {
         bool cbfOnly = false;
         bool recoveryMode = false;
         bool finished = false;
+        double spanLow = 0.0;      // passing span relative to the original click, in frames
+        double spanHigh = 0.0;
+        double windowWidth = 0.0;  // how many frames the click can move and still pass
+        int grid = 10;             // substeps per frame this result was measured at
+        int tested = 0;
+        int passedCount = 0;
     };
 
     struct FrameTaskProbe {
@@ -78,6 +86,7 @@ namespace {
 
             addLabel("Add Selected", 90, 32, menu_selector(FrameTaskPopup::onAddSelected));
             addLabel("Start All", 260, 32, menu_selector(FrameTaskPopup::onStartAll));
+            addLabel("Subdivide", 430, 32, menu_selector(FrameTaskPopup::onSubdivide));
 
             m_status = CCLabelBMFont::create("No tasks", "chatFont.fnt");
             m_status->setScale(0.42f);
@@ -118,8 +127,10 @@ namespace {
         void onStartTask(CCObject* sender) {
             auto item = static_cast<CCNode*>(sender);
             int index = item->getTag();
-            if (index >= 0 && index < static_cast<int>(s_tasks.size()))
+            if (index >= 0 && index < static_cast<int>(s_tasks.size())) {
+                s_grid = 0;
                 startTesting(index, false);
+            }
         }
 
         void generateAllTasks() {
@@ -144,7 +155,33 @@ namespace {
             }
         }
 
+        // "How many more frames do I need to pass this gap?" Double the substeps per frame
+        // and re-test, so a click that is impossible (or only 1 frame wide) on the current
+        // grid can be found between its samples, e.g. widening 1.0f to 1.6f.
+        void onSubdivide(CCObject*) {
+            if (m_testing || s_tasks.empty())
+                return;
+
+            if (!cbf::enabled()) {
+                m_status->setString("Enable CBF in the menu to test sub-frames");
+                return;
+            }
+
+            constexpr int maxGrid = 80;
+            int const next = activeGrid() * 2;
+
+            if (next > maxGrid) {
+                m_status->setString(fmt::format("Already at max subdivision (1/{})", activeGrid()).c_str());
+                return;
+            }
+
+            s_grid = next;
+            m_status->setString(fmt::format("Subdividing: 1/{} frame steps", next).c_str());
+            startTesting(0, true);
+        }
+
         void onStartAll(CCObject*) {
+            s_grid = 0; // back to the menu's Substep Divider
             if (s_tasks.empty())
                 generateAllTasks();
 
@@ -171,14 +208,16 @@ namespace {
                 std::string resultText;
                 if (task.finished) {
                     if (task.kind == FrameWindowKind::Impossible)
-                        resultText = task.cbfOnly ? "  [X] CBF" : "  [X]";
+                        resultText = task.cbfOnly
+                            ? fmt::format("  [X] CBF {:.1f}f", task.windowWidth)
+                            : "  [X]";
                     else if (task.kind == FrameWindowKind::Disconnected)
                         resultText = fmt::format("  [A-] {} valid", successful);
                     else
                         resultText = fmt::format(
-                            "  [{}] {}f",
+                            "  [{}] {:.1f}f",
                             formatWindowKind(task.kind),
-                            task.windowCount
+                            task.windowWidth
                         );
                 }
 
@@ -355,8 +394,15 @@ namespace {
             return result;
         }
 
+        // Substeps per frame used for testing. 0 follows the menu's Substep Divider;
+        // Subdivide doubles it to look for passes in gaps the coarser grid steps over.
+        static int activeGrid() {
+            return s_grid > 0 ? s_grid : cbf::substepDivider();
+        }
+
         void buildCandidates(const FrameTask& task) {
             m_candidates.clear();
+            int const grid = activeGrid();
 
             for (int offset = -8; offset <= 8; ++offset) {
                 m_candidates.push_back({
@@ -373,10 +419,10 @@ namespace {
             if (task.subframe > 0.0001 ||
                 (m_timeline && m_timeline->isCBFModeEnabled())) {
                 for (int offset = -2; offset <= 2; ++offset) {
-                    for (int step = 1; step < 10; ++step) {
+                    for (int step = 1; step < grid; ++step) {
                         m_candidates.push_back({
                             std::max(0, task.frame + offset),
-                            step / 10.0,
+                            static_cast<double>(step) / grid,
                             0,
                             0,
                             0.0,
@@ -406,6 +452,7 @@ namespace {
             m_taskIndex = taskIndex;
             m_testingAll = all;
             m_testing = true;
+            cbf::setDividerOverride(activeGrid());
 
             if (m_testingAll) {
                 for (auto& task : s_tasks)
@@ -838,6 +885,44 @@ namespace {
                 }
             }
 
+            // Passing span relative to where the click originally sat. The width counts the
+            // last sample too, so one passing whole frame is 1.0f and, on a 1/10 grid, a
+            // window from -1.4 to +0.3 is 1.8f.
+            {
+                double low = std::numeric_limits<double>::max();
+                double high = std::numeric_limits<double>::lowest();
+                int const grid = activeGrid();
+                int tested = 0;
+                int passed = 0;
+
+                for (const auto& result : task.results) {
+                    ++tested;
+                    if (!result.passed)
+                        continue;
+
+                    ++passed;
+                    double offset =
+                        (result.frame + result.subframe) -
+                        (task.frame + task.subframe);
+                    low = std::min(low, offset);
+                    high = std::max(high, offset);
+                }
+
+                task.grid = grid;
+                task.tested = tested;
+                task.passedCount = passed;
+
+                if (passed > 0) {
+                    double const step = subframeCount > 0 ? 1.0 / grid : 1.0;
+                    task.spanLow = low;
+                    task.spanHigh = high;
+                    task.windowWidth = (high - low) + step;
+                }
+                else {
+                    task.spanLow = task.spanHigh = task.windowWidth = 0.0;
+                }
+            }
+
             task.windowCount = integerCount > 0 ? integerCount : subframeCount;
             task.windowLow =
                 first == std::numeric_limits<int>::max() ? 0 : first;
@@ -983,6 +1068,7 @@ namespace {
             g.respawnFrame = m_backupRespawnFrame;
 
             m_testing = false;
+            cbf::setDividerOverride(0);
 
             if (m_testingAll) {
                 for (auto& task : s_tasks)
@@ -1000,9 +1086,14 @@ namespace {
                 for (const auto& result : task.results)
                     total += result.passed ? 1 : 0;
 
-            m_status->setString(
-                fmt::format("Finished: {} successful timings", total).c_str()
-            );
+            int const grid = activeGrid();
+            std::string note = fmt::format("Finished: {} successful timings (1/{} steps)", total, grid);
+
+            // Sub-frame timings only play back on the grid they were found on.
+            if (grid != cbf::substepDivider())
+                note += fmt::format(" - set Substep Divider to {} to play them", grid);
+
+            m_status->setString(note.c_str());
         }
 
         void stopTesting(bool restore) {
@@ -1071,6 +1162,7 @@ namespace {
         bool m_recoveryProbe = false;
 
         static inline std::vector<FrameTask> s_tasks;
+        static inline int s_grid = 0;
     };
 }
 

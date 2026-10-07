@@ -16,7 +16,16 @@ bool enabled() {
     return Mod::get()->getSavedValue<bool>("macro_cbf", true);
 }
 
+static int s_dividerOverride = 0;
+
+void setDividerOverride(int divider) {
+    s_dividerOverride = std::clamp(divider, 0, 1000);
+}
+
 int substepDivider() {
+    if (s_dividerOverride > 0)
+        return s_dividerOverride;
+
     auto const value = Mod::get()->getSavedValue<int64_t>("cbf_substep_divider", 10);
     return static_cast<int>(std::clamp<int64_t>(value, 1, 1000));
 }

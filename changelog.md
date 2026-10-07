@@ -6,6 +6,8 @@
 * Fixed CBF firing inputs on the respawn frame.
 * Fixed timeline overlay being wider than the screen; toolbar and hint text now fit any aspect ratio.
 * Added missing Undo/Redo declarations (build fix).
+* Frame Tasks: sub-frame testing follows the Substep Divider instead of a fixed 1/10 grid; window results show fractional widths (e.g. 1.6f).
+* Frame Tasks: added Subdivide, which doubles the substeps per frame and re-tests to find passes between samples.
 
 # v2.4.1
 
