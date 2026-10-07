@@ -930,17 +930,40 @@ namespace {
                 return;
             }
 
+            int index = m_selectedTaskIndex;
+            if (index < 0 || index >= static_cast<int>(s_tasks.size()))
+                index = 0;
+
+            auto& task = s_tasks[index];
+            if (!task.finished || task.windowCount <= 0) {
+                m_status->setString("Analyze a task before subdividing it");
+                return;
+            }
+
             constexpr int maxGrid = 80;
             int const next = activeGrid() * 2;
 
             if (next > maxGrid) {
-                m_status->setString(fmt::format("Already at max subdivision (1/{})", activeGrid()).c_str());
+                m_status->setString(
+                    fmt::format("Already at max subdivision (1/{})", activeGrid()).c_str()
+                );
                 return;
             }
 
+            m_subdivideMode = true;
+            m_subdivideLow = task.windowLow;
+            m_subdivideHigh = task.windowHigh;
             s_grid = next;
-            m_status->setString(fmt::format("Subdividing: 1/{} frame steps", next).c_str());
-            startTesting(0, true);
+
+            m_status->setString(
+                fmt::format(
+                    "Subdividing task {}: 1/{} frame steps",
+                    index + 1,
+                    next
+                ).c_str()
+            );
+
+            startTesting(index, false);
         }
 
         void onStartAll(CCObject*) {
@@ -1249,22 +1272,66 @@ namespace {
             m_earlyDone = false;
             m_lateDone = false;
 
+            if (m_subdivideMode) {
+                m_minTestFrame = m_subdivideLow;
+                m_maxTestFrame = m_subdivideHigh;
+
+                if (m_minTestFrame > m_maxTestFrame)
+                    return;
+
+                const int divider = std::max(1, activeGrid());
+                const size_t count =
+                    static_cast<size_t>(m_maxTestFrame - m_minTestFrame + 1) *
+                    static_cast<size_t>(divider);
+
+                m_candidates.reserve(count);
+
+                for (int frame = m_minTestFrame; frame <= m_maxTestFrame; ++frame) {
+                    for (int step = 0; step < divider; ++step) {
+                        m_candidates.push_back({
+                            frame,
+                            static_cast<double>(step) / divider,
+                            0,
+                            0,
+                            0.0,
+                            false,
+                            false
+                        });
+                    }
+                }
+
+                return;
+            }
+
             m_minTestFrame = std::max(0, task.frame - m_maxShift);
             m_maxTestFrame = task.frame + m_maxShift;
 
             const int eventIndex = task.eventIndex;
             if (eventIndex >= 0 && eventIndex < static_cast<int>(m_backupMacro.inputs.size())) {
-                if (eventIndex > 0)
-                    m_minTestFrame = std::max(
-                        m_minTestFrame,
-                        static_cast<int>(m_backupMacro.inputs[eventIndex - 1].frame) + 1
-                    );
+                const double target =
+                    static_cast<double>(task.frame) + task.subframe;
 
-                if (eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()))
-                    m_maxTestFrame = std::min(
-                        m_maxTestFrame,
-                        static_cast<int>(m_backupMacro.inputs[eventIndex + 1].frame) - 1
-                    );
+                if (eventIndex > 0 &&
+                    m_backupMacro.inputs[eventIndex - 1].player2 == task.player2) {
+                    const double previous =
+                        m_backupMacro.inputs[eventIndex - 1].getPreciseFrame();
+                    if (previous < target)
+                        m_minTestFrame = std::max(
+                            m_minTestFrame,
+                            static_cast<int>(std::floor(previous)) + 1
+                        );
+                }
+
+                if (eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()) &&
+                    m_backupMacro.inputs[eventIndex + 1].player2 == task.player2) {
+                    const double next =
+                        m_backupMacro.inputs[eventIndex + 1].getPreciseFrame();
+                    if (next > target)
+                        m_maxTestFrame = std::min(
+                            m_maxTestFrame,
+                            static_cast<int>(std::ceil(next)) - 1
+                        );
+                }
             }
 
             // Always establish the recorded input as the known-good baseline.
@@ -1717,54 +1784,121 @@ namespace {
         }
 
         void finalizeTaskWindow(FrameTask& task) {
-            std::vector<int> passedFrames;
-            passedFrames.reserve(task.results.size());
+            std::vector<const FrameTaskResult*> passedResults;
+            passedResults.reserve(task.results.size());
 
             for (const auto& result : task.results) {
-                if (result.passed && std::abs(result.subframe - task.subframe) < 0.0001)
-                    passedFrames.push_back(result.frame);
+                if (result.passed)
+                    passedResults.push_back(&result);
             }
 
-            std::sort(passedFrames.begin(), passedFrames.end());
-            passedFrames.erase(
-                std::unique(passedFrames.begin(), passedFrames.end()),
-                passedFrames.end()
+            std::sort(
+                passedResults.begin(),
+                passedResults.end(),
+                [](const auto* a, const auto* b) {
+                    if (a->frame != b->frame)
+                        return a->frame < b->frame;
+                    return a->subframe < b->subframe;
+                }
             );
 
             task.tested = static_cast<int>(task.results.size());
-            task.passedCount = static_cast<int>(passedFrames.size());
+            task.passedCount = static_cast<int>(passedResults.size());
+            task.grid = activeGrid();
 
-            if (!passedFrames.empty()) {
-                task.windowLow = passedFrames.front();
-                task.windowHigh = passedFrames.back();
-
-                bool hole = false;
-                for (size_t i = 1; i < passedFrames.size(); ++i) {
-                    if (passedFrames[i] != passedFrames[i - 1] + 1) {
-                        hole = true;
-                        break;
-                    }
-                }
-
-                task.spanLow =
-                    static_cast<double>(task.windowLow) -
-                    static_cast<double>(task.frame);
-                task.spanHigh =
-                    static_cast<double>(task.windowHigh) -
-                    static_cast<double>(task.frame);
-                task.windowWidth =
-                    static_cast<double>(task.windowHigh - task.windowLow + 1);
-
-                task.windowCount = static_cast<int>(passedFrames.size());
-                task.kind = hole
-                    ? FrameWindowKind::Disconnected
-                    : FrameWindowKind::Normal;
-            } else {
+            if (passedResults.empty()) {
                 task.windowLow = task.windowHigh = task.frame;
                 task.spanLow = task.spanHigh = 0.0;
                 task.windowWidth = 0.0;
                 task.windowCount = 0;
                 task.kind = FrameWindowKind::Impossible;
+            } else if (m_subdivideMode) {
+                const double preciseLow =
+                    static_cast<double>(passedResults.front()->frame) +
+                    passedResults.front()->subframe;
+                const double preciseHigh =
+                    static_cast<double>(passedResults.back()->frame) +
+                    passedResults.back()->subframe;
+
+                task.windowLow = passedResults.front()->frame;
+                task.windowHigh = passedResults.back()->frame;
+                task.spanLow =
+                    preciseLow -
+                    (static_cast<double>(task.frame) + task.subframe);
+                task.spanHigh =
+                    preciseHigh -
+                    (static_cast<double>(task.frame) + task.subframe);
+                task.windowWidth = preciseHigh - preciseLow;
+                task.windowCount = static_cast<int>(passedResults.size());
+
+                bool hole = false;
+                const double sampleStep = 1.0 / std::max(1, task.grid);
+                double previous = preciseLow;
+
+                for (size_t i = 1; i < passedResults.size(); ++i) {
+                    const double current =
+                        static_cast<double>(passedResults[i]->frame) +
+                        passedResults[i]->subframe;
+
+                    if (current - previous > sampleStep + 0.0001) {
+                        hole = true;
+                        break;
+                    }
+
+                    previous = current;
+                }
+
+                task.kind = hole
+                    ? FrameWindowKind::Disconnected
+                    : FrameWindowKind::Normal;
+            } else {
+                std::vector<int> passedFrames;
+                passedFrames.reserve(passedResults.size());
+
+                for (const auto* result : passedResults) {
+                    if (std::abs(result->subframe - task.subframe) < 0.0001)
+                        passedFrames.push_back(result->frame);
+                }
+
+                std::sort(passedFrames.begin(), passedFrames.end());
+                passedFrames.erase(
+                    std::unique(passedFrames.begin(), passedFrames.end()),
+                    passedFrames.end()
+                );
+
+                task.passedCount = static_cast<int>(passedFrames.size());
+
+                if (!passedFrames.empty()) {
+                    task.windowLow = passedFrames.front();
+                    task.windowHigh = passedFrames.back();
+                    task.spanLow =
+                        static_cast<double>(task.windowLow) -
+                        static_cast<double>(task.frame);
+                    task.spanHigh =
+                        static_cast<double>(task.windowHigh) -
+                        static_cast<double>(task.frame);
+                    task.windowWidth =
+                        static_cast<double>(task.windowHigh - task.windowLow + 1);
+                    task.windowCount = static_cast<int>(passedFrames.size());
+
+                    bool hole = false;
+                    for (size_t i = 1; i < passedFrames.size(); ++i) {
+                        if (passedFrames[i] != passedFrames[i - 1] + 1) {
+                            hole = true;
+                            break;
+                        }
+                    }
+
+                    task.kind = hole
+                        ? FrameWindowKind::Disconnected
+                        : FrameWindowKind::Normal;
+                } else {
+                    task.windowLow = task.windowHigh = task.frame;
+                    task.spanLow = task.spanHigh = 0.0;
+                    task.windowWidth = 0.0;
+                    task.windowCount = 0;
+                    task.kind = FrameWindowKind::Impossible;
+                }
             }
 
             for (const auto& result : task.results) {
@@ -1899,6 +2033,10 @@ namespace {
                 m_selectedTaskIndex = m_taskIndex;
             }
 
+            m_subdivideMode = false;
+            m_subdivideLow = 0;
+            m_subdivideHigh = 0;
+
             Macro::updateTPS();
             refreshList();
 
@@ -1960,6 +2098,9 @@ namespace {
         int m_minTestFrame = 0;
         int m_maxTestFrame = 0;
         static constexpr int m_maxShift = 48;
+        bool m_subdivideMode = false;
+        int m_subdivideLow = 0;
+        int m_subdivideHigh = 0;
         int m_taskIndex = -1;
         int m_candidateIndex = 0;
         int m_targetFrame = 0;
