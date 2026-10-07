@@ -322,6 +322,11 @@ PauseLayer* Global::getPauseLayer() {
 $execute{
   auto & g = Global::get();
 
+  if (!g.mod->setSavedValue("defaults_set_16", true)) {
+    g.mod->setSavedValue("macro_cbf", true);
+    g.mod->setSavedValue<int64_t>("cbf_substep_divider", 10);
+  }
+
   if (!g.mod->setSavedValue("defaults_set_14", true)) {
     g.mod->setSavedValue("render_fade_in_video", std::to_string(2));
     g.mod->setSavedValue("render_fade_out_video", std::to_string(2));

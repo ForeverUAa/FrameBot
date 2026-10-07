@@ -165,7 +165,7 @@ bool Renderer::shouldUseAPI() {
 bool Renderer::toggle() {
     auto& g = Global::get();
     if (Loader::get()->isModLoaded("syzzi.click_between_frames")) {
-        FLAlertLayer::create("Render", "Disable CBF in Geode to render a level.", "OK")->show();
+        FLAlertLayer::create("Render", "Disable the Click Between Frames mod (syzzi.click_between_frames) in Geode to render a level.", "OK")->show();
         return false;
     }
 

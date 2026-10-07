@@ -231,7 +231,7 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
     }
 
-    bool cbfEnabled = g.mod->getSettingValue<bool>("cbf");
+    bool cbfEnabled = cbf::enabled();
 
     // Inputs on the respawn frame are skipped by handlePlaying, so CBF must not fire them either.
     if (g.state == state::playing && cbfEnabled && Global::getCurrentFrame() != g.respawnFrame)
@@ -318,7 +318,7 @@ class $modify(BGLHook, GJBaseGameLayer) {
 
   void handlePlaying(int frame) {
     auto& g = Global::get();
-    bool const cbfEnabled = g.mod->getSettingValue<bool>("cbf");
+    bool const cbfEnabled = cbf::enabled();
     if (m_levelEndAnimationStarted) return;
 
     if (m_player1->m_isDead) {

@@ -12,6 +12,15 @@ using namespace geode::prelude;
 
 namespace cbf {
 
+bool enabled() {
+    return Mod::get()->getSavedValue<bool>("macro_cbf", true);
+}
+
+int substepDivider() {
+    auto const value = Mod::get()->getSavedValue<int64_t>("cbf_substep_divider", 10);
+    return static_cast<int>(std::clamp<int64_t>(value, 1, 1000));
+}
+
 Engine* Engine::get() {
     static Engine instance;
     return &instance;
@@ -33,6 +42,8 @@ void Engine::prepare(
 
     m_preparedFrame = frame;
 
+    int const divider = substepDivider();
+
     for (size_t i = currentAction; i < macro.inputs.size(); ++i) {
         auto const& input = macro.inputs[i];
 
@@ -46,9 +57,19 @@ void Engine::prepare(
         if (input.button < 1 || input.button > 3)
             continue;
 
+        // Snap to the substep grid. Substep 0 is just the frame start, which the
+        // normal input path already handles; the last grid line is k = divider - 1.
+        int const step = std::clamp(
+            static_cast<int>(std::lround(input.subframe * divider)),
+            0,
+            divider - 1
+        );
+        if (step == 0)
+            continue;
+
         m_armed.push_back({
             input.frame,
-            input.subframe,
+            static_cast<double>(step) / divider,
             input.button,
             input.down,
             input.player2,

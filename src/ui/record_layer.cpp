@@ -8,12 +8,17 @@
 #include "trajectory_settings_layer.hpp"
 #include "mirror_settings_layer.hpp"
 #include "../hacks/coin_finder.hpp"
+#include "../hacks/cbf.hpp"
 #include "../hacks/show_trajectory.hpp"
 
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/utils/web.hpp>
 
 const std::vector<std::vector<RecordSetting>> settings {
+	{
+		{ "CBF:", "macro_cbf", InputType::None },
+		{ "Substep Divider:", "cbf_substep_divider", InputType::Substep },
+	},
 	{
 		{ "TPS Bypass:", "macro_tps_enabled", InputType::Tps, 0.4f },
 		{ "Speedhack:", "macro_speedhack_enabled", InputType::Speedhack, 0.4f },
@@ -312,6 +317,18 @@ void RecordLayer::textChanged(CCTextInputNode* node) {
     if (!node) return;
 
     mod = Mod::get();
+
+    if (substepInput && node == substepInput) {
+        std::string str = substepInput->getString();
+        if (str.empty()) return; // allow clearing while typing; the saved value is kept
+
+        int64_t value = numFromString<int64_t>(str).unwrapOr(0);
+        if (value < 1 || value > 1000)
+            return substepInput->setString(std::to_string(cbf::substepDivider()).c_str());
+
+        mod->setSavedValue<int64_t>("cbf_substep_divider", value);
+        return;
+    }
 
     if (node == seedInput) {
 
@@ -1012,6 +1029,38 @@ void RecordLayer::loadSetting(RecordSetting sett, float yPos) {
     nodes.push_back(static_cast<CCNode*>(lbl));
     menu->addChild(lbl);
 
+    if (sett.input == InputType::Substep) {
+        // Number field only (no checkbox), right-aligned in the checkbox column.
+        CCScale9Sprite* bg = CCScale9Sprite::create("square02b_001.png", { 0, 0, 80, 80 });
+        bg->setPosition(ccp(157.f, yPos + 10));
+        bg->setScale(0.355f);
+        bg->setColor({ 0,0,0 });
+        bg->setOpacity(75);
+        bg->setAnchorPoint({ 0, 1 });
+        bg->setContentSize({ 100, 55 });
+        bg->setZOrder(29);
+        nodes.push_back(static_cast<CCNode*>(bg));
+        menu->addChild(bg);
+
+        substepInput = CCTextInputNode::create(150, 30, "10", "chatFont.fnt");
+        substepInput->setPosition(ccp(174.75f, yPos));
+        substepInput->m_textField->setAnchorPoint({ 0.5f, 0.5f });
+        substepInput->ignoreAnchorPointForPosition(true);
+        substepInput->setMaxLabelScale(0.7f);
+        substepInput->setMouseEnabled(true);
+        substepInput->setTouchEnabled(true);
+        substepInput->setContentSize({ 32, 20 });
+        substepInput->setAllowedChars("0123456789");
+        substepInput->setString(std::to_string(cbf::substepDivider()).c_str());
+        substepInput->setMaxLabelWidth(30.f);
+        substepInput->setDelegate(this);
+        substepInput->setMaxLabelLength(4);
+
+        nodes.push_back(static_cast<CCNode*>(substepInput));
+        menu->addChild(substepInput);
+        return;
+    }
+
     CCSprite* spriteOn = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
     CCSprite* spriteOff = CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png");
     float toggleScale = 0.555f;
@@ -1208,10 +1257,11 @@ void RecordLayer::goToSettingsPage(int page) {
     respawnInput = nullptr;
     seedInput = nullptr;
     tpsInput = nullptr;
+    substepInput = nullptr;
 
     tpsBg = nullptr;
 
-    for (size_t i = 0; i < 6; i++)
+    for (size_t i = 0; i < std::min<size_t>(6, settings[page].size()); i++)
         loadSetting(settings[page][i], ySettingPositions[i]);
 
     updateDots();

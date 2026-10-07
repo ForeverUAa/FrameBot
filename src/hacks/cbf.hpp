@@ -60,4 +60,8 @@ private:
 
 bool canSplit(PlayerObject* player);
 
+// Menu-controlled settings (saved values, so the menu is the single source of truth).
+bool enabled();
+int substepDivider();   // sub-frame inputs snap to k / divider of a physics step
+
 } // namespace cbf

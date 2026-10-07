@@ -1,3 +1,12 @@
+# Unreleased
+
+* CBF and Substep Divider now live on the first Settings page of the menu (saved values; replaces the Geode `cbf` setting).
+* Sub-frame inputs snap to the Substep Divider grid during playback (default 10).
+* Fixed P2 being stepped twice on CBF ticks in dual levels.
+* Fixed CBF firing inputs on the respawn frame.
+* Fixed timeline overlay being wider than the screen; toolbar and hint text now fit any aspect ratio.
+* Added missing Undo/Redo declarations (build fix).
+
 # v2.4.1
 
 * Added Auto Clicker keybind.

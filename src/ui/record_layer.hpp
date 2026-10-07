@@ -16,7 +16,8 @@ enum InputType {
 	Speedhack,
 	Seed,
 	Respawn,
-	Tps
+	Tps,
+	Substep
 };
 
 struct RecordSetting {
@@ -62,6 +63,7 @@ public:
 	CCTextInputNode* speedhackInput = nullptr;
 	CCTextInputNode* respawnInput = nullptr;
 	CCTextInputNode* tpsInput = nullptr;
+	CCTextInputNode* substepInput = nullptr;
 
 	std::vector<CCNode*> nodes;
 	std::vector<CCSprite*> dots;
