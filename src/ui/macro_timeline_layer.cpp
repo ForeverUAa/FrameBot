@@ -508,7 +508,9 @@ namespace {
             auto* accent = CCDrawNode::create();
             accent->drawRect(
                 CCRectMake(16, 262, 488, 2),
-                ccc4f(0.25f, 0.75f, 1.0f, 0.9f)
+                ccc4f(0.25f, 0.75f, 1.0f, 0.9f),
+                0.0f,
+                ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
             );
             chrome->addChild(accent);
 
@@ -706,12 +708,12 @@ namespace {
 
             if (m_status) {
                 m_status->setString(
-                    task.finished
+                    (task.finished
                         ? fmt::format("Window  {} .. {}    |    {}",
                             low,
                             high,
                             formatWindowKind(task.kind))
-                        : fmt::format("Ready to analyze    |    current timing {}", formatTime(task.frame, task.subframe))
+                        : fmt::format("Ready to analyze    |    current timing {}", formatTime(task.frame, task.subframe))).c_str()
                 );
             }
         }
