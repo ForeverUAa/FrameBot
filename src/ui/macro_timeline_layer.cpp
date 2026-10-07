@@ -1222,6 +1222,11 @@ bool MacroTimelineLayer::setup(Macro* setupMacro) {
     for (auto* label : inspectorLabels)
         if (label) label->setVisible(false);
 
+    bool const cbfEnabled = Mod::get()->getSavedValue<bool>("macro_cbf", true);
+    timeline->setPlayhead(0, 0.0);
+    if (cbfModeToggle)
+        cbfModeToggle->setOpacity(cbfEnabled ? 255 : 140);
+
     scheduleUpdate();
     return true;
 }
@@ -1231,8 +1236,14 @@ void MacroTimelineLayer::keyBackClicked() {
 }
 
 void MacroTimelineLayer::onTasksPressed(CCObject*) {
-    auto popup = FrameTaskPopup::create(timeline.get());
-    if (popup) popup->show();
+    if (!timeline)
+        return;
+
+    auto* popup = FrameTaskPopup::create(timeline.get());
+    if (!popup)
+        return;
+
+    popup->show();
 }
 
 void MacroTimelineLayer::initInspector() {
@@ -1412,6 +1423,11 @@ void MacroTimelineLayer::initTimeline() {
 
 void MacroTimelineLayer::updateTimeline(float dt) {
     if (!timeline) return;
+
+    if (Global::get().state == state::playing) {
+        int frame = Global::getCurrentFrame();
+        timeline->setPlayhead(frame, 0.0);
+    }
 
     inspector->updateFromTimeline();
     updateFrameCounter();
@@ -1593,20 +1609,29 @@ void MacroTimelineLayer::scheduleUpdate() {
 
 // Event handlers
 void MacroTimelineLayer::onPlayPressed(CCObject*) {
-    if (!timeline || timeline->getEventCount() == 0) return;
-    timeline->setPlayhead(timeline->getPlayheadFrame(), timeline->getPlayheadSubframe());
-    this->unschedule(schedule_selector(MacroTimelineLayer::updateTimeline));
-    this->schedule(schedule_selector(MacroTimelineLayer::updateTimeline), 1.f / 60.f);
+    if (!timeline || timeline->getEventCount() == 0)
+        return;
+
+    if (Global::get().state != state::playing)
+        Macro::togglePlaying();
+
+    toolbarPlaying = Global::get().state == state::playing;
 }
 
 void MacroTimelineLayer::onPausePressed(CCObject*) {
-    this->unschedule(schedule_selector(MacroTimelineLayer::updateTimeline));
-    this->schedule(schedule_selector(MacroTimelineLayer::updateTimeline), 0.016f);
+    if (Global::get().state == state::playing)
+        Macro::togglePlaying();
+
+    toolbarPlaying = false;
 }
 
 void MacroTimelineLayer::onStopPressed(CCObject*) {
-    // TODO: Stop playback and reset playhead
+    if (Global::get().state == state::playing)
+        Macro::togglePlaying();
+
+    Macro::resetState();
     timeline->setPlayhead(0, 0.0);
+    toolbarPlaying = false;
 }
 
 void MacroTimelineLayer::onStepFramePressed(CCObject*) {
@@ -1615,7 +1640,16 @@ void MacroTimelineLayer::onStepFramePressed(CCObject*) {
 }
 
 void MacroTimelineLayer::onCBFTogglePressed(CCObject*) {
+    if (!timeline)
+        return;
+
+    bool enabled = Mod::get()->getSavedValue<bool>("macro_cbf", true);
+    Mod::get()->setSavedValue("macro_cbf", !enabled);
     timeline->toggleCBFMode();
+
+    if (cbfModeToggle) {
+        cbfModeToggle->setOpacity(!enabled ? 255 : 140);
+    }
 }
 
 void MacroTimelineLayer::onZoomInPressed(CCObject*) {
