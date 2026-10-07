@@ -1183,8 +1183,12 @@ MacroTimelineLayer* MacroTimelineLayer::create(Macro* macro) {
         if (ret->m_title)
             ret->m_title->setVisible(false);
 
-        // Move the content towards the bottom of the gameplay area.
-        ret->m_mainLayer->setPositionY(win.height * 0.22f);
+        // Popup::m_mainLayer uses local coordinates from (0, 0) to (width, height).
+        // Keep the overlay anchored to the bottom of the screen.
+        ret->m_mainLayer->setPosition({
+            (win.width - width) / 2.0f,
+            0.0f
+        });
 
         ret->autorelease();
         return ret;
@@ -1234,8 +1238,8 @@ void MacroTimelineLayer::initInspector() {
     inspectorBg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
     inspectorBg->setContentSize({width, height});
     inspectorBg->setPosition({
-        0.0f,
-        -12.0f
+        width / 2.0f,
+        170.0f
     });
     inspectorBg->setColor({0, 0, 0});
     inspectorBg->setOpacity(180);
@@ -1243,7 +1247,10 @@ void MacroTimelineLayer::initInspector() {
     m_mainLayer->addChild(inspectorBg);
 
     inspectorMenu = CCMenu::create();
-    inspectorMenu->setPosition({0.0f, 0.0f});
+    inspectorMenu->setPosition({
+        width / 2.0f,
+        170.0f
+    });
     inspectorMenu->setZOrder(31);
     m_mainLayer->addChild(inspectorMenu);
 
@@ -1291,7 +1298,7 @@ void MacroTimelineLayer::initToolbar() {
     float width = win.width - 24.0f;
 
     toolbarMenu = CCMenu::create();
-    toolbarMenu->setPosition({0.0f, 18.0f});
+    toolbarMenu->setPosition({width / 2.0f, 202.0f});
     toolbarMenu->setZOrder(100);
     m_mainLayer->addChild(toolbarMenu);
 
@@ -1351,7 +1358,7 @@ void MacroTimelineLayer::initToolbar() {
 
 void MacroTimelineLayer::initTimeline() {
     auto win = CCDirector::sharedDirector()->getWinSize();
-    constexpr float bottom = -92.0f;
+    constexpr float bottom = 42.0f;
     float width = win.width - 24.0f;
 
     renderState.timelineSize = CCSizeMake(width, 96.0f);
@@ -1360,7 +1367,7 @@ void MacroTimelineLayer::initTimeline() {
     renderState.eventHeight = 18.0f;
 
     timelineLayer = CCLayer::create();
-    timelineLayer->setPosition({-width / 2.0f, bottom});
+    timelineLayer->setPosition({0.0f, bottom});
     timelineLayer->setContentSize(renderState.timelineSize);
     timelineLayer->setZOrder(20);
     m_mainLayer->addChild(timelineLayer);
@@ -1393,20 +1400,20 @@ void MacroTimelineLayer::initTimeline() {
     frameCounterLabel = CCLabelBMFont::create("Frame: 0", "chatFont.fnt");
     frameCounterLabel->setScale(0.50f);
     frameCounterLabel->setAnchorPoint({0.0f, 0.5f});
-    frameCounterLabel->setPosition({-width / 2.0f + 16.0f, -60.0f});
+    frameCounterLabel->setPosition({16.0f, 18.0f});
     m_mainLayer->addChild(frameCounterLabel);
 
     subframeLabel = CCLabelBMFont::create("0.00", "chatFont.fnt");
     subframeLabel->setScale(0.50f);
     subframeLabel->setAnchorPoint({0.0f, 0.5f});
-    subframeLabel->setPosition({-width / 2.0f + 105.0f, -60.0f});
+    subframeLabel->setPosition({105.0f, 18.0f});
     m_mainLayer->addChild(subframeLabel);
 
     timelineInfoLabel = CCLabelBMFont::create("", "chatFont.fnt");
     timelineInfoLabel->setScale(0.34f);
     timelineInfoLabel->setAnchorPoint({0.0f, 0.5f});
     timelineInfoLabel->setOpacity(185);
-    timelineInfoLabel->setPosition({-width / 2.0f + 18.0f, -39.0f});
+    timelineInfoLabel->setPosition({18.0f, 38.0f});
     m_mainLayer->addChild(timelineInfoLabel);
 }
 
