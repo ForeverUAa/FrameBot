@@ -127,8 +127,8 @@ namespace {
             200, 201, 202, 203,
             286, 287,
             660, 745,
-            1331, 1332, 1334, 1335, 1337,
-            1933, 1934
+            1331, 1334,
+            1931, 1932
         };
         return ids.contains(objectId);
     }
@@ -416,7 +416,9 @@ namespace {
                 ? selectedEvent
                 : 0;
 
-            startTesting(m_selectedTaskIndex, true, 24);
+            // Analyze must start at the first input, not the selected one.
+            // The selected task remains highlighted while the whole macro is scanned.
+            startTesting(0, true, 24);
         }
 
         void onStop(CCObject*) {
