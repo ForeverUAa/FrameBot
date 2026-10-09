@@ -899,7 +899,7 @@ namespace {
 
             m_targetFrame = candidate.frame;
             m_targetSubframe = candidate.subframe;
-            m_attemptPosition = {0, 0};
+            m_attemptPosition = cocos2d::CCPoint{0.f, 0.f};
 
             // Every timing trial must start with a clean CBF queue, otherwise
             // sub-frame inputs armed by the previous trial can leak into this one.
