@@ -250,6 +250,58 @@ int Macro::save(std::string author, std::string desc, std::string path, bool jso
     return 0;
 }
 
+int Macro::saveAutosave(Macro& source, std::filesystem::path path) {
+    if (path.empty())
+        return 20;
+
+    std::error_code ec;
+    const auto parent = path.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec)
+            return 20;
+    }
+
+    source.subdivision = inferMacroSubdivision(source);
+    source.duration = source.inputs.empty() || source.framerate <= 0.f
+        ? 0.f
+        : static_cast<float>(source.inputs.back().getPreciseFrame() / source.framerate);
+
+    const auto data = source.exportData(false);
+    auto tempPath = path;
+    tempPath += ".tmp";
+
+    {
+        std::ofstream f(tempPath, std::ios::binary | std::ios::trunc);
+        if (!f)
+            return 20;
+
+        f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        if (!f) {
+            f.close();
+            std::filesystem::remove(tempPath, ec);
+            return 21;
+        }
+    }
+
+    // Windows does not replace an existing destination through rename, so retry
+    // after removing only this dedicated autosave file.
+    std::filesystem::rename(tempPath, path, ec);
+    if (ec) {
+        std::error_code removeError;
+        std::filesystem::remove(path, removeError);
+        ec.clear();
+        std::filesystem::rename(tempPath, path, ec);
+    }
+
+    if (ec) {
+        log::warn("Failed to replace timeline autosave at {}: {}", path.string(), ec.message());
+        return 22;
+    }
+
+    return 0;
+}
+
 bool Macro::loadXDFile(std::filesystem::path path) {
 
     Macro newMacro = Macro::XDtoGDR(path);

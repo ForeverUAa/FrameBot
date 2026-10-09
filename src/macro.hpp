@@ -105,6 +105,9 @@ public:
 
     static int save(std::string author, std::string desc, std::string path, bool json = false);
 
+    // Overwrite a stable recovery file rather than creating numbered copies.
+    static int saveAutosave(Macro& source, std::filesystem::path path);
+
     static void autoSave(GJGameLevel* level, int number);
 
     static void tryAutosave(GJGameLevel* level, CheckpointObject* cp);

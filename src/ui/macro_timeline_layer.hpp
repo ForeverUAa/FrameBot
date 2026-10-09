@@ -81,6 +81,7 @@ private:
     struct InputState {
         CCPoint mousePos = {0, 0};
         bool isDragging = false;
+        bool draggedEventChanged = false;
         int draggedEventIdx = -1;
         float dragStartX = 0.0f;
         double dragStartPreciseFrame = 0.0;
@@ -136,6 +137,7 @@ private:
     void updateFrameCounter();
     void updateSubframeCounter();
     void updateInspectorPanel();
+    void autosaveTimeline();
     void adjustSelectedFrame(int delta);
     void adjustSelectedSubframe(double delta);
     void cycleSelectedButton();

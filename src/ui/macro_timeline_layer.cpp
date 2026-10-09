@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <limits>
 #include <unordered_set>
 
@@ -1918,13 +1919,17 @@ void MacroTimelineLayer::onZoomOutPressed(CCObject*) {
 }
 
 void MacroTimelineLayer::onUndoPressed(CCObject*) {
-    if (timeline && timeline->canUndo())
+    if (timeline && timeline->canUndo()) {
         timeline->undo();
+        autosaveTimeline();
+    }
 }
 
 void MacroTimelineLayer::onRedoPressed(CCObject*) {
-    if (timeline && timeline->canRedo())
+    if (timeline && timeline->canRedo()) {
         timeline->redo();
+        autosaveTimeline();
+    }
 }
 
 // Input handling
@@ -1934,6 +1939,7 @@ bool MacroTimelineLayer::ccTouchBegan(CCTouch* touch, CCEvent* event) {
 
     const CCPoint eventPos = eventsLayer->convertToNodeSpace(touch->getLocation());
     const int eventIdx = hitTestEvent(eventPos);
+    inputState.draggedEventChanged = false;
     if (eventIdx >= 0) {
         timeline->selectEvent(eventIdx);
         inputState.isDragging = true;
@@ -2004,23 +2010,27 @@ void MacroTimelineLayer::ccTouchMoved(CCTouch* touch, CCEvent* event) {
         precise = 0.0;
 
     if (const auto* evt = timeline->getEvent(inputState.draggedEventIdx)) {
-        timeline->setEventFrame(
-            inputState.draggedEventIdx,
-            static_cast<int>(std::floor(precise))
-        );
+        const int newFrame = static_cast<int>(std::floor(precise));
+        const double newSubframe = precise - std::floor(precise);
+        if (evt->frame != newFrame ||
+            (timeline->isCBFModeEnabled() && std::abs(evt->subframe - newSubframe) > 0.0001)) {
+            inputState.draggedEventChanged = true;
+        }
+
+        timeline->setEventFrame(inputState.draggedEventIdx, newFrame);
 
         if (timeline->isCBFModeEnabled()) {
-            timeline->setEventSubframe(
-                inputState.draggedEventIdx,
-                precise - std::floor(precise)
-            );
+            timeline->setEventSubframe(inputState.draggedEventIdx, newSubframe);
         }
     }
 }
 
 void MacroTimelineLayer::ccTouchEnded(CCTouch* touch, CCEvent* event) {
     FLAlertLayer::ccTouchEnded(touch, event);
+    if (inputState.draggedEventIdx >= 0 && inputState.draggedEventChanged)
+        autosaveTimeline();
     inputState.isDragging = false;
+    inputState.draggedEventChanged = false;
     inputState.draggedEventIdx = -1;
 }
 
@@ -2170,30 +2180,69 @@ void MacroTimelineLayer::updateInspectorPanel() {
         inspectorLabels[i]->setString(values[i].c_str());
 }
 
+void MacroTimelineLayer::autosaveTimeline() {
+    if (!macro)
+        return;
+
+    const std::filesystem::path folder =
+        Mod::get()->getSettingValue<std::filesystem::path>("autosaves_folder");
+    if (folder.empty()) {
+        log::warn("Timeline autosave skipped: Auto Saves Location is empty.");
+        return;
+    }
+
+    std::string levelName = macro->levelInfo.name;
+    for (char& ch : levelName) {
+        const auto c = static_cast<unsigned char>(ch);
+        if (!std::isalnum(c) && ch != '-' && ch != '_')
+            ch = '_';
+    }
+    if (levelName.empty())
+        levelName = "untitled";
+    if (levelName.size() > 48)
+        levelName.resize(48);
+
+    const auto path = folder / fmt::format(
+        "timeline_autosave_{}_{}.gdr",
+        macro->levelInfo.id,
+        levelName
+    );
+    const int result = Macro::saveAutosave(*macro, path);
+    if (result != 0)
+        log::warn("Failed to autosave timeline edits. ID: {}. Path: {}", result, path.string());
+    else
+        log::debug("Autosaved timeline edits to {}", path.string());
+}
+
 void MacroTimelineLayer::adjustSelectedFrame(int delta) {
     if (!inspector->hasData()) return;
     inspector->setFrame(std::max(0, inspector->getDetails().frame + delta));
+    autosaveTimeline();
 }
 
 void MacroTimelineLayer::adjustSelectedSubframe(double delta) {
     if (!inspector->hasData()) return;
     inspector->setSubframe(inspector->getDetails().subframe + delta);
+    autosaveTimeline();
 }
 
 void MacroTimelineLayer::cycleSelectedButton() {
     if (!inspector->hasData()) return;
     int button = inspector->getDetails().button;
     inspector->setButton(button >= 3 ? 1 : button + 1);
+    autosaveTimeline();
 }
 
 void MacroTimelineLayer::toggleSelectedPlayer() {
     if (!inspector->hasData()) return;
     inspector->setPlayer(!inspector->getDetails().player2);
+    autosaveTimeline();
 }
 
 void MacroTimelineLayer::toggleSelectedAction() {
     if (!inspector->hasData()) return;
     inspector->setPressed(!inspector->getDetails().pressed);
+    autosaveTimeline();
 }
 
 void MacroTimelineLayer::onFrameDown(CCObject*) { adjustSelectedFrame(-1); }
