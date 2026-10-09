@@ -898,6 +898,9 @@ namespace {
             m_targetSubframe = candidate.subframe;
             m_attemptPosition = {0, 0};
 
+            // Every timing trial must start with a clean CBF queue, otherwise
+            // sub-frame inputs armed by the previous trial can leak into this one.
+            cbf::Engine::get()->reset();
             pl->resetLevelFromStart();
 
             if (m_status) {
@@ -1021,6 +1024,7 @@ namespace {
             g.restart = m_backupRestart;
             g.firstAttempt = m_backupFirstAttempt;
             g.respawnFrame = m_backupRespawnFrame;
+            cbf::Engine::get()->reset();
             cbf::setDividerOverride(0);
 
             m_testing = false;
@@ -1088,6 +1092,7 @@ namespace {
             g.restart = m_backupRestart;
             g.firstAttempt = m_backupFirstAttempt;
             g.respawnFrame = m_backupRespawnFrame;
+            cbf::Engine::get()->reset();
             cbf::setDividerOverride(0);
 
             m_testing = false;
