@@ -45,7 +45,6 @@ namespace {
         std::vector<FrameTaskResult> results;
         std::vector<AlignmentSample> alignments;
         bool finished = false;
-        bool baselineFailed = false;
         int tested = 0;
     };
 
@@ -429,13 +428,23 @@ namespace {
             if (m_testing)
                 cancelTesting();
 
-            s_tasks.clear();
-            m_selectedTaskIndex = -1;
+            for (auto& task : s_tasks) {
+                task.results.clear();
+                task.alignments.clear();
+                task.finished = false;
+                task.tested = 0;
+            }
+
             clearMarkers();
             refreshList();
-            m_selectedLabel->setString("Select an input on the timeline");
-            m_status->setString("Results cleared.");
-            m_detailsLabel->setString("Orb: player Y - orb Y     |     Portal: player X - portal X");
+            if (m_selectedTaskIndex >= 0 &&
+                m_selectedTaskIndex < static_cast<int>(s_tasks.size())) {
+                m_status->setString("Results cleared. Tasks kept.");
+                updateDetails(s_tasks[m_selectedTaskIndex]);
+            } else {
+                m_status->setString("Results cleared. Select an input on the timeline.");
+                m_detailsLabel->setString("Orb: player Y - orb Y     |     Portal: player X - portal X");
+            }
         }
 
         void onSelectTask(CCObject* sender) {
@@ -702,6 +711,20 @@ namespace {
 
         static int findTaskEvent(const Macro& source, const FrameTask& task) {
             const double target = static_cast<double>(task.frame) + task.subframe;
+
+            // Preserve exact identity when the macro contains duplicate actions
+            // at the same timestamp. Falling back to nearest matching timing keeps
+            // the lookup resilient if a timeline edit has reordered its inputs.
+            if (task.eventIndex >= 0 &&
+                task.eventIndex < static_cast<int>(source.inputs.size())) {
+                const auto& event = source.inputs[task.eventIndex];
+                if (event.button == task.button &&
+                    event.player2 == task.player2 &&
+                    event.down == task.down &&
+                    std::abs(event.getPreciseFrame() - target) < 0.0001)
+                    return task.eventIndex;
+            }
+
             int best = -1;
             double bestDistance = std::numeric_limits<double>::max();
 
@@ -765,7 +788,6 @@ namespace {
                     task.results.clear();
                     task.alignments.clear();
                     task.finished = false;
-                    task.baselineFailed = false;
                     task.tested = 0;
                 }
             } else {
@@ -773,7 +795,6 @@ namespace {
                 task.results.clear();
                 task.alignments.clear();
                 task.finished = false;
-                task.baselineFailed = false;
                 task.tested = 0;
             }
 
