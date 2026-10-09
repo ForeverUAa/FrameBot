@@ -121,13 +121,16 @@ namespace {
         // Gravity, mode, size, speed, and later-game mode portals.
         // Filtering IDs prevents unrelated effect triggers from being reported.
         static const std::unordered_set<int> ids = {
-            10, 11, 12, 13, 47,
+            // Legacy gravity, form, and mirror portals.
+            10, 11, 12, 13, 45, 46, 47,
+            // Size and UFO portals.
             99, 101, 111,
+            // Speed portals.
             200, 201, 202, 203,
-            286, 287,
-            660, 745,
-            1331, 1334,
-            1931, 1932
+            // Dual, wave, robot, spider, and red speed portals.
+            286, 287, 660, 745, 1331, 1334,
+            // Swing, linked/unlinked teleport, orange teleport, green gravity.
+            1933, 2064, 2902, 2926, 747
         };
         return ids.contains(objectId);
     }
