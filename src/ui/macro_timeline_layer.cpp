@@ -1,27 +1,38 @@
 #include "macro_timeline_layer.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
+#include <unordered_set>
 
 #include "../hacks/cbf.hpp"
-#include "../practice_fixes/practice_fixes.hpp"
-
+#include <Geode/modify/GJBaseGameLayer.hpp>
 
 namespace {
-    enum class FrameWindowKind {
-        Normal,
-        Shared,
-        Optimal,
-        Recovery,
-        Alternating,
-        Disconnected,
-        Impossible
+    enum class AlignmentKind {
+        Orb,
+        Portal
+    };
+
+    struct AlignmentSample {
+        AlignmentKind kind = AlignmentKind::Orb;
+        int objectId = 0;
+        int inputFrame = 0;
+        double inputSubframe = 0.0;
+        int interactionFrame = 0;
+        cocos2d::CCPoint playerPosition = {0, 0};
+        cocos2d::CCPoint objectPosition = {0, 0};
+        float axisDelta = 0.0f;
     };
 
     struct FrameTaskResult {
         int frame = 0;
         double subframe = 0.0;
-        bool passed = false;
+        bool survived = false;
+        bool died = false;
         cocos2d::CCPoint position = {0, 0};
+        std::vector<AlignmentSample> alignments;
     };
 
     struct FrameTask {
@@ -32,553 +43,235 @@ namespace {
         bool player2 = false;
         bool down = true;
         std::vector<FrameTaskResult> results;
-        FrameWindowKind kind = FrameWindowKind::Normal;
-        int windowCount = 0;
-        int windowLow = 0;
-        int windowHigh = 0;
-        bool cbfOnly = false;
-        bool recoveryMode = false;
+        std::vector<AlignmentSample> alignments;
         bool finished = false;
-        bool baselineFailed = false;
-        double spanLow = 0.0;      // passing span relative to the original click, in frames
-        double spanHigh = 0.0;
-        double windowWidth = 0.0;  // how many frames the click can move and still pass
-        int grid = 10;             // substeps per frame this result was measured at
         int tested = 0;
-        int passedCount = 0;
     };
 
-    struct FrameTaskProbe {
-        int frame = 0;
-        double subframe = 0.0;
-        int contextShift = 0;
-        int pairedFrame = 0;
-        double pairedSubframe = 0.0;
-        bool paired = false;
-        bool alternating = false;
+    struct AlignmentProbe {
+        bool active = false;
+        bool player2 = false;
+        int firstFrame = 0;
+        int lastFrame = 0;
+        int inputFrame = 0;
+        double inputSubframe = 0.0;
+        std::vector<AlignmentSample> hits;
+
+        void reset() {
+            active = false;
+            hits.clear();
+        }
+
+        void record(
+            PlayerObject* player,
+            GameObject* object,
+            AlignmentKind kind
+        ) {
+            if (!active || !player || !object)
+                return;
+
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl)
+                return;
+
+            PlayerObject* expected = player2 ? pl->m_player2 : pl->m_player1;
+            if (!expected || player != expected)
+                return;
+
+            const int frame = Global::getCurrentFrame();
+            if (frame < firstFrame || frame > lastFrame)
+                return;
+
+            const auto playerPosition = player->getPosition();
+            const auto objectPosition = object->getPosition();
+            const float delta = kind == AlignmentKind::Orb
+                ? playerPosition.y - objectPosition.y
+                : playerPosition.x - objectPosition.x;
+
+            // Collision callbacks can fire more than once for one object in a run.
+            auto existing = std::find_if(
+                hits.begin(),
+                hits.end(),
+                [&](const AlignmentSample& sample) {
+                    return sample.kind == kind &&
+                        sample.objectId == object->m_objectID &&
+                        std::abs(sample.objectPosition.x - objectPosition.x) < 0.1f &&
+                        std::abs(sample.objectPosition.y - objectPosition.y) < 0.1f;
+                }
+            );
+            if (existing != hits.end())
+                return;
+
+            hits.push_back({
+                kind,
+                object->m_objectID,
+                inputFrame,
+                inputSubframe,
+                frame,
+                playerPosition,
+                objectPosition,
+                delta
+            });
+        }
     };
 
-    class FastFrameWindowSimulator final {
-    public:
-        struct Snapshot {
-            GJGameState gameState;
-            PlayerData p1;
-            PlayerData p2;
-            bool hasP2 = false;
-            int frame = 0;
+    AlignmentProbe g_alignmentProbe;
+
+    bool isPortalAlignmentObject(int objectId) {
+        // Gravity, mode, size, speed, and later-game mode portals.
+        // Filtering IDs prevents unrelated effect triggers from being reported.
+        static const std::unordered_set<int> ids = {
+            // Legacy gravity, form, and mirror portals.
+            10, 11, 12, 13, 45, 46, 47,
+            // Size and UFO portals.
+            99, 101, 111,
+            // Speed portals.
+            200, 201, 202, 203,
+            // Dual, wave, robot, spider, and red speed portals.
+            286, 287, 660, 745, 1331, 1334,
+            // Swing, linked/unlinked teleport, orange teleport, green gravity.
+            1933, 2064, 2902, 2926, 747
         };
-
-        struct Result {
-            int frame = 0;
-            double subframe = 0.0;
-            bool passed = false;
-            CCPoint position = {0, 0};
-        };
-
-        explicit FastFrameWindowSimulator(PlayLayer* pl) : m_pl(pl) {
-            if (!m_pl)
-                return;
-
-            m_fakeP1 = createFakePlayer("framebot-window-p1");
-            initializeFakeCollections(m_fakeP1, false);
-
-            if (m_pl->m_player2) {
-                m_fakeP2 = createFakePlayer("framebot-window-p2");
-                initializeFakeCollections(m_fakeP2, true);
-            }
-        }
-
-        ~FastFrameWindowSimulator() {
-            if (m_fakeP1)
-                m_fakeP1->removeFromParentAndCleanup(true);
-            if (m_fakeP2)
-                m_fakeP2->removeFromParentAndCleanup(true);
-
-            releaseFakeCollections();
-        }
-
-        bool valid() const {
-            if (!m_pl || !m_fakeP1 ||
-                !m_fakeTouchingRingsP1 ||
-                !m_fakeCollisionLogTopP1 ||
-                !m_fakeCollisionLogBottomP1 ||
-                !m_fakeCollisionLogLeftP1 ||
-                !m_fakeCollisionLogRightP1)
-                return false;
-
-            if (m_pl->m_player2 &&
-                (!m_fakeP2 ||
-                 !m_fakeTouchingRingsP2 ||
-                 !m_fakeCollisionLogTopP2 ||
-                 !m_fakeCollisionLogBottomP2 ||
-                 !m_fakeCollisionLogLeftP2 ||
-                 !m_fakeCollisionLogRightP2))
-                return false;
-
-            return true;
-        }
-
-        Snapshot capture(int frame) const {
-            Snapshot snapshot;
-            snapshot.frame = frame;
-
-            if (!m_pl || !m_pl->m_player1)
-                return snapshot;
-
-            snapshot.gameState = m_pl->m_gameState;
-            snapshot.p1 = PlayerPracticeFixes::saveData(m_pl->m_player1);
-            snapshot.hasP2 = m_pl->m_player2 != nullptr;
-
-            if (snapshot.hasP2)
-                snapshot.p2 = PlayerPracticeFixes::saveData(m_pl->m_player2);
-
-            return snapshot;
-        }
-
-        std::vector<Result> analyze(
-            const Snapshot& snapshot,
-            const Macro& baseMacro,
-            const FrameTask& task,
-            int lowFrame,
-            int highFrame
-        ) {
-            std::vector<Result> results;
-            if (!valid() || lowFrame > highFrame)
-                return results;
-
-            results.reserve(static_cast<size_t>(highFrame - lowFrame + 1));
-
-            for (int candidateFrame = lowFrame;
-                 candidateFrame <= highFrame;
-                 ++candidateFrame) {
-                Macro candidateMacro = baseMacro;
-
-                if (task.eventIndex < 0 ||
-                    task.eventIndex >= static_cast<int>(candidateMacro.inputs.size()))
-                    break;
-
-                candidateMacro.inputs[task.eventIndex].frame = candidateFrame;
-                candidateMacro.inputs[task.eventIndex].subframe = task.subframe;
-                std::sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
-
-                int passFrame = candidateFrame + 12;
-                const double candidateTime =
-                    static_cast<double>(candidateFrame) + task.subframe;
-
-                for (const auto& event : candidateMacro.inputs) {
-                    if (event.player2 == task.player2 &&
-                        event.button <= 3 &&
-                        event.getPreciseFrame() > candidateTime + 0.0001) {
-                        passFrame = event.frame;
-                        break;
-                    }
-                }
-
-                results.push_back(simulateCandidate(
-                    snapshot,
-                    candidateMacro,
-                    task,
-                    candidateFrame,
-                    task.subframe,
-                    passFrame
-                ));
-            }
-
-            m_pl->m_gameState = snapshot.gameState;
-            return results;
-        }
-
-    private:
-        PlayLayer* m_pl = nullptr;
-        PlayerObject* m_fakeP1 = nullptr;
-        PlayerObject* m_fakeP2 = nullptr;
-
-        CCArray* m_fakeTouchingRingsP1 = nullptr;
-        CCArray* m_fakeTouchingRingsP2 = nullptr;
-        CCDictionary* m_fakeCollisionLogTopP1 = nullptr;
-        CCDictionary* m_fakeCollisionLogBottomP1 = nullptr;
-        CCDictionary* m_fakeCollisionLogLeftP1 = nullptr;
-        CCDictionary* m_fakeCollisionLogRightP1 = nullptr;
-        CCDictionary* m_fakeCollisionLogTopP2 = nullptr;
-        CCDictionary* m_fakeCollisionLogBottomP2 = nullptr;
-        CCDictionary* m_fakeCollisionLogLeftP2 = nullptr;
-        CCDictionary* m_fakeCollisionLogRightP2 = nullptr;
-
-        template <typename T>
-        static T* retainedCreate(T* object) {
-            if (object)
-                object->retain();
-            return object;
-        }
-
-        void initializeFakeCollections(PlayerObject* fake, bool player2) {
-            if (!fake)
-                return;
-
-            auto*& touchingRings =
-                player2 ? m_fakeTouchingRingsP2 : m_fakeTouchingRingsP1;
-            auto*& top =
-                player2 ? m_fakeCollisionLogTopP2 : m_fakeCollisionLogTopP1;
-            auto*& bottom =
-                player2 ? m_fakeCollisionLogBottomP2 : m_fakeCollisionLogBottomP1;
-            auto*& left =
-                player2 ? m_fakeCollisionLogLeftP2 : m_fakeCollisionLogLeftP1;
-            auto*& right =
-                player2 ? m_fakeCollisionLogRightP2 : m_fakeCollisionLogRightP1;
-
-            if (!touchingRings)
-                touchingRings = retainedCreate(CCArray::create());
-            if (!top)
-                top = retainedCreate(CCDictionary::create());
-            if (!bottom)
-                bottom = retainedCreate(CCDictionary::create());
-            if (!left)
-                left = retainedCreate(CCDictionary::create());
-            if (!right)
-                right = retainedCreate(CCDictionary::create());
-
-            // These containers must belong exclusively to the fake player. The
-            // practice-fix snapshot otherwise aliases the real player's arrays,
-            // which lets prediction mutate live game state.
-            fake->m_touchingRings = touchingRings;
-            fake->m_collisionLogTop = top;
-            fake->m_collisionLogBottom = bottom;
-            fake->m_collisionLogLeft = left;
-            fake->m_collisionLogRight = right;
-        }
-
-        template <typename T>
-        static void releaseObject(T*& object) {
-            if (object) {
-                object->release();
-                object = nullptr;
-            }
-        }
-
-        void releaseFakeCollections() {
-            releaseObject(m_fakeTouchingRingsP1);
-            releaseObject(m_fakeTouchingRingsP2);
-            releaseObject(m_fakeCollisionLogTopP1);
-            releaseObject(m_fakeCollisionLogBottomP1);
-            releaseObject(m_fakeCollisionLogLeftP1);
-            releaseObject(m_fakeCollisionLogRightP1);
-            releaseObject(m_fakeCollisionLogTopP2);
-            releaseObject(m_fakeCollisionLogBottomP2);
-            releaseObject(m_fakeCollisionLogLeftP2);
-            releaseObject(m_fakeCollisionLogRightP2);
-        }
-
-        PlayerObject* createFakePlayer(const char* id) {
-            if (!m_pl->m_objectLayer)
-                return nullptr;
-
-            auto* player = PlayerObject::create(1, 1, m_pl, m_pl, true);
-            if (!player)
-                return nullptr;
-
-            player->setID(id);
-            player->setVisible(false);
-            m_pl->m_objectLayer->addChild(player);
-            return player;
-        }
-
-        static void clearCollisionLogs(PlayerObject* player) {
-            if (!player)
-                return;
-
-            if (player->m_collisionLogTop)
-                player->m_collisionLogTop->removeAllObjects();
-            if (player->m_collisionLogBottom)
-                player->m_collisionLogBottom->removeAllObjects();
-            if (player->m_collisionLogLeft)
-                player->m_collisionLogLeft->removeAllObjects();
-            if (player->m_collisionLogRight)
-                player->m_collisionLogRight->removeAllObjects();
-        }
-
-        static void applyInput(PlayerObject* player, const input& event) {
-            if (!player)
-                return;
-
-            const auto button = static_cast<PlayerButton>(event.button);
-            if (event.down)
-                player->pushButton(button);
-            else
-                player->releaseButton(button);
-        }
-
-        void restorePlayer(
-            PlayerObject* fake,
-            PlayerObject* real,
-            const PlayerData& data,
-            bool player2
-        ) {
-            if (!fake || !real)
-                return;
-
-            fake->copyAttributes(real);
-            PlayerPracticeFixes::applyData(fake, data, player2, true);
-            initializeFakeCollections(fake, player2);
-
-            fake->setVisible(false);
-            fake->m_isDead = false;
-        }
-
-        Result simulateCandidate(
-            const Snapshot& snapshot,
-            const Macro& macro,
-            const FrameTask& task,
-            int targetFrame,
-            double targetSubframe,
-            int passFrame
-        ) {
-            Result result;
-            result.frame = targetFrame;
-            result.subframe = targetSubframe;
-
-            m_pl->m_gameState = snapshot.gameState;
-
-            restorePlayer(m_fakeP1, m_pl->m_player1, snapshot.p1, false);
-            if (snapshot.hasP2 && m_fakeP2 && m_pl->m_player2)
-                restorePlayer(m_fakeP2, m_pl->m_player2, snapshot.p2, true);
-
-            int inputIndex = 0;
-            while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                   macro.inputs[inputIndex].getPreciseFrame() <= snapshot.frame + 0.000001)
-                ++inputIndex;
-
-            const float tps = std::max(1.0f, Global::getTPS());
-            const float physicsDt = 1.0f / tps;
-            const float delta = physicsDt * 60.0f;
-            bool targetSeen = false;
-
-            auto advance = [&](double fraction) {
-                fraction = std::clamp(fraction, 0.0, 1.0);
-                if (fraction <= 0.0)
-                    return;
-
-                float const segmentDt =
-                    static_cast<float>(physicsDt * fraction);
-                float const segmentDelta =
-                    delta * static_cast<float>(fraction);
-
-                m_pl->m_gameState.m_totalTime += physicsDt * fraction;
-                m_pl->m_gameState.m_unkDouble3 +=
-                    (physicsDt * fraction) /
-                    std::max(0.0001f, m_pl->m_gameState.m_timeWarp);
-
-                if (m_fakeP1) {
-                    m_fakeP1->m_totalTime += physicsDt * fraction;
-                    clearCollisionLogs(m_fakeP1);
-                    m_fakeP1->update(segmentDelta);
-                    if (m_pl->checkCollisions(m_fakeP1, segmentDelta, false) == 1)
-                        m_fakeP1->m_isDead = true;
-                }
-
-                if (m_fakeP2 && m_pl->m_gameState.m_isDualMode) {
-                    m_fakeP2->m_totalTime += physicsDt * fraction;
-                    clearCollisionLogs(m_fakeP2);
-                    m_fakeP2->update(segmentDelta);
-                    if (m_pl->checkCollisions(m_fakeP2, segmentDelta, false) == 1)
-                        m_fakeP2->m_isDead = true;
-                }
-            };
-
-            for (int frame = snapshot.frame + 1; frame <= passFrame; ++frame) {
-                ++m_pl->m_gameState.m_currentProgress;
-
-                double cursor = 0.0;
-
-                while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                       macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
-                       macro.inputs[inputIndex].subframe <= 0.000001) {
-                    auto event = macro.inputs[inputIndex];
-                    bool player2 = event.player2;
-
-                    if (Macro::flipControls())
-                        player2 = !player2;
-
-                    applyInput(
-                        player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1,
-                        event
-                    );
-                    ++inputIndex;
-                }
-
-                while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                       macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
-                       macro.inputs[inputIndex].subframe > cursor + 0.000001 &&
-                       macro.inputs[inputIndex].subframe < 1.0) {
-                    double const fraction =
-                        std::clamp(macro.inputs[inputIndex].subframe, cursor, 1.0);
-
-                    advance(fraction - cursor);
-                    cursor = fraction;
-
-                    while (inputIndex < static_cast<int>(macro.inputs.size()) &&
-                           macro.inputs[inputIndex].frame == static_cast<uint32_t>(frame) &&
-                           std::abs(macro.inputs[inputIndex].subframe - cursor) < 0.000001) {
-                        auto event = macro.inputs[inputIndex];
-                        bool player2 = event.player2;
-
-                        if (Macro::flipControls())
-                            player2 = !player2;
-
-                        applyInput(
-                            player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1,
-                            event
-                        );
-                        ++inputIndex;
-                    }
-                }
-
-                advance(1.0 - cursor);
-
-                auto* targetPlayer =
-                    task.player2 && m_fakeP2 ? m_fakeP2 : m_fakeP1;
-
-                if (!targetSeen &&
-                    (frame > targetFrame ||
-                     (frame == targetFrame && task.subframe <= 1.0))) {
-                    if (targetPlayer) {
-                        targetSeen = true;
-                        result.position = targetPlayer->getPosition();
-                    }
-                }
-
-                if ((m_fakeP1 && m_fakeP1->m_isDead) ||
-                    (m_fakeP2 && m_pl->m_gameState.m_isDualMode &&
-                     m_fakeP2->m_isDead))
-                    return result;
-
-                if (m_pl->m_levelEndAnimationStarted) {
-                    result.passed = true;
-                    return result;
-                }
-
-                if (targetSeen && frame >= passFrame) {
-                    result.passed = true;
-                    return result;
-                }
-            }
-
-            result.passed = targetSeen;
-            return result;
-        }
-    };
-
-
-    class FrameTaskPopup final : public framebot::Popup<>, public TextInputDelegate {
+        return ids.contains(objectId);
+    }
+
+    void captureOrbAlignment(PlayerObject* player, RingObject* ring) {
+        g_alignmentProbe.record(player, ring, AlignmentKind::Orb);
+    }
+
+    void capturePortalAlignment(PlayerObject* player, EffectGameObject* portal) {
+        if (!portal || !isPortalAlignmentObject(portal->m_objectID))
+            return;
+
+        g_alignmentProbe.record(player, portal, AlignmentKind::Portal);
+    }
+}
+
+class $modify(GJBaseGameLayer) {
+    void playerTouchedRing(PlayerObject* player, RingObject* ring) {
+        captureOrbAlignment(player, ring);
+        GJBaseGameLayer::playerTouchedRing(player, ring);
+    }
+
+    void playerTouchedTrigger(PlayerObject* player, EffectGameObject* object) {
+        capturePortalAlignment(player, object);
+        GJBaseGameLayer::playerTouchedTrigger(player, object);
+    }
+};
+
+namespace {
+    class FrameTaskPopup final : public framebot::Popup<> {
     public:
+        static constexpr int markerTag = 0xF7A5;
+
         static FrameTaskPopup* create(MacroTimeline* timeline) {
-            auto ret = new FrameTaskPopup();
+            auto* ret = new FrameTaskPopup();
             ret->m_timeline = timeline;
             if (ret->initAnchored(520, 320, Utils::getTexture().c_str())) {
                 ret->autorelease();
                 return ret;
             }
+
             delete ret;
             return nullptr;
         }
 
     protected:
         bool setup() override {
-            this->setTitle("FRAME ANALYZER");
-
-            // Dedicated layers keep the chrome independent from the dynamic task list.
-            auto* chrome = CCLayer::create();
-            chrome->setPosition({0, 0});
-            m_mainLayer->addChild(chrome, -1);
+            setTitle("ALIGNMENT ANALYZER");
 
             auto panel = [&](CCRect rect, ccColor3B color, GLubyte opacity) {
                 auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
-                bg->setContentSize({rect.size.width, rect.size.height});
+                bg->setContentSize(rect.size);
                 bg->setPosition(rect.origin + rect.size / 2.0f);
                 bg->setColor(color);
                 bg->setOpacity(opacity);
-                chrome->addChild(bg);
+                m_mainLayer->addChild(bg);
                 return bg;
             };
 
-            panel({10, 72, 500, 168}, {18, 20, 25}, 235);
-            panel({16, 214, 488, 52}, {28, 32, 42}, 245);
-            panel({16, 78, 488, 126}, {10, 12, 16}, 210);
-            panel({16, 38, 488, 30}, {28, 32, 42}, 225);
+            panel({10, 40, 500, 232}, {18, 20, 25}, 235);
+            panel({16, 234, 488, 36}, {28, 32, 42}, 245);
+            panel({16, 44, 488, 178}, {10, 12, 16}, 210);
 
             auto* accent = CCDrawNode::create();
             accent->drawRect(
-                CCRectMake(16, 262, 488, 2),
+                CCRectMake(16, 268, 488, 2),
                 ccc4f(0.25f, 0.75f, 1.0f, 0.9f),
                 0.0f,
-                ccc4f(0.0f, 0.0f, 0.0f, 0.0f)
+                ccc4f(0, 0, 0, 0)
             );
-            chrome->addChild(accent);
+            m_mainLayer->addChild(accent);
 
-            m_headerLabel = CCLabelBMFont::create("FRAME ANALYZER", "bigFont.fnt");
+            m_headerLabel = CCLabelBMFont::create("ALIGNMENT ANALYZER", "bigFont.fnt");
             m_headerLabel->setScale(0.46f);
             m_headerLabel->setAnchorPoint({0, 0.5f});
-            m_headerLabel->setPosition({22, 249});
+            m_headerLabel->setPosition({22, 252});
             m_mainLayer->addChild(m_headerLabel);
 
-            m_countLabel = CCLabelBMFont::create("0 TASKS", "chatFont.fnt");
+            m_countLabel = CCLabelBMFont::create("0 INPUTS", "chatFont.fnt");
             m_countLabel->setScale(0.38f);
             m_countLabel->setAnchorPoint({1, 0.5f});
-            m_countLabel->setPosition({496, 249});
+            m_countLabel->setPosition({496, 252});
             m_countLabel->setOpacity(190);
             m_mainLayer->addChild(m_countLabel);
 
-            auto* selectedCaption = CCLabelBMFont::create("SELECTED TASK", "chatFont.fnt");
-            selectedCaption->setScale(0.29f);
-            selectedCaption->setAnchorPoint({0, 0.5f});
-            selectedCaption->setPosition({24, 238});
-            selectedCaption->setOpacity(150);
-            m_mainLayer->addChild(selectedCaption);
-
-            m_selectedLabel = CCLabelBMFont::create("No task selected", "bigFont.fnt");
-            m_selectedLabel->setScale(0.43f);
+            m_selectedLabel = CCLabelBMFont::create("Select an input on the timeline", "bigFont.fnt");
+            m_selectedLabel->setScale(0.39f);
             m_selectedLabel->setAnchorPoint({0, 0.5f});
-            m_selectedLabel->setPosition({24, 224});
+            m_selectedLabel->setPosition({22, 231});
             m_mainLayer->addChild(m_selectedLabel);
 
-            m_status = CCLabelBMFont::create("Ready", "chatFont.fnt");
-            m_status->setScale(0.34f);
+            m_list = CCMenu::create();
+            m_list->setPosition({0, 0});
+            m_mainLayer->addChild(m_list, 5);
+
+            m_status = CCLabelBMFont::create(
+                "Ready. Task scans nearby timings; Analyze scans the macro.",
+                "chatFont.fnt"
+            );
+            m_status->setScale(0.32f);
             m_status->setAnchorPoint({0, 0.5f});
-            m_status->setPosition({24, 89});
-            m_status->setOpacity(200);
+            m_status->setPosition({22, 80});
             m_mainLayer->addChild(m_status);
+
+            m_detailsLabel = CCLabelBMFont::create(
+                "Orb: player Y - orb Y     |     Portal: player X - portal X",
+                "chatFont.fnt"
+            );
+            m_detailsLabel->setScale(0.28f);
+            m_detailsLabel->setAnchorPoint({0, 0.5f});
+            m_detailsLabel->setPosition({22, 59});
+            m_detailsLabel->setOpacity(200);
+            m_mainLayer->addChild(m_detailsLabel);
 
             m_actionMenu = CCMenu::create();
             m_actionMenu->setPosition({0, 0});
             m_mainLayer->addChild(m_actionMenu, 10);
 
-            constexpr float maxScale = 0.43f;
-            constexpr float gap = 5.0f;
-            constexpr float margin = 18.0f;
-
             struct Action {
-                char const* text;
+                const char* text;
                 SEL_MenuHandler callback;
             };
 
-            std::array<Action, 6> actions = {{
-                {"TEST", menu_selector(FrameTaskPopup::onTestSelected)},
+            const std::array<Action, 4> actions = {{
+                {"TASK", menu_selector(FrameTaskPopup::onTask)},
                 {"ANALYZE", menu_selector(FrameTaskPopup::onAnalyze)},
                 {"STOP", menu_selector(FrameTaskPopup::onStop)},
-                {"ADD INPUT", menu_selector(FrameTaskPopup::onAddSelected)},
-                {"APPLY", menu_selector(FrameTaskPopup::onApplyWindow)},
-                {"SUBDIVIDE", menu_selector(FrameTaskPopup::onSubdivide)}
+                {"CLEAR", menu_selector(FrameTaskPopup::onClear)}
             }};
 
-            float natural = 0.0f;
+            constexpr float gap = 12.0f;
+            float naturalWidth = 0.0f;
             std::array<ButtonSprite*, actions.size()> sprites{};
             for (size_t i = 0; i < actions.size(); ++i) {
                 sprites[i] = ButtonSprite::create(actions[i].text);
-                natural += sprites[i]->getContentSize().width;
+                naturalWidth += sprites[i]->getContentSize().width;
             }
 
-            float const available = 488.0f - margin * 2.0f - gap * (actions.size() - 1);
-            float const scale = std::min(maxScale, available / natural);
-            float const total = natural * scale + gap * (actions.size() - 1);
+            const float available = 450.0f - gap * (actions.size() - 1);
+            const float scale = std::min(0.46f, available / std::max(1.0f, naturalWidth));
+            const float total = naturalWidth * scale + gap * (actions.size() - 1);
             float x = 260.0f - total / 2.0f;
 
             for (size_t i = 0; i < actions.size(); ++i) {
@@ -588,84 +281,25 @@ namespace {
                     this,
                     actions[i].callback
                 );
-                float const width = sprites[i]->getContentSize().width * scale;
+                const float width = sprites[i]->getContentSize().width * scale;
                 item->setPosition({x + width / 2.0f, 20});
                 m_actionMenu->addChild(item);
                 x += width + gap;
             }
 
-            m_list = CCMenu::create();
-            m_list->setPosition({0, 0});
-            m_mainLayer->addChild(m_list, 5);
-
-            auto addInput = [&](const char* placeholder, float x, CCTextInputNode*& target) {
-                auto* bg = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
-                bg->setContentSize({72, 30});
-                bg->setScale(0.55f);
-                bg->setColor({0, 0, 0});
-                bg->setOpacity(90);
-                bg->setPosition({x, 53});
-                m_mainLayer->addChild(bg);
-
-                target = CCTextInputNode::create(70, 24, placeholder, "chatFont.fnt");
-                target->setPosition({x, 53});
-                target->m_textField->setAnchorPoint({0.5f, 0.5f});
-                target->ignoreAnchorPointForPosition(true);
-                target->setMaxLabelScale(0.7f);
-                target->setMouseEnabled(true);
-                target->setTouchEnabled(true);
-                target->setContentSize({58, 20});
-                target->setAllowedChars("-0123456789");
-                target->setMaxLabelWidth(52.f);
-                target->setMaxLabelLength(8);
-                target->setDelegate(this);
-                m_mainLayer->addChild(target, 20);
-            };
-
-            auto* lowLabel = CCLabelBMFont::create("Low", "chatFont.fnt");
-            lowLabel->setScale(0.36f);
-            lowLabel->setPosition({335, 53});
-            m_mainLayer->addChild(lowLabel);
-
-            auto* highLabel = CCLabelBMFont::create("High", "chatFont.fnt");
-            highLabel->setScale(0.36f);
-            highLabel->setPosition({433, 53});
-            m_mainLayer->addChild(highLabel);
-
-            addInput("low", 369, m_lowInput);
-            addInput("high", 467, m_highInput);
-
-
-
-            // Fake-player physics analysis is disabled for stability.
-            // The live replay path remains the source of truth.
-            this->schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
-
             if (m_timeline) {
-                int const selected = m_timeline->getSelectedEventIndex();
-                if (selected >= 0) {
-                    int existing = -1;
-                    for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
-                        if (s_tasks[i].eventIndex == selected) {
-                            existing = i;
-                            break;
-                        }
-                    }
-
-                    if (existing < 0) {
-                        s_tasks.push_back(makeTask(selected));
-                        existing = static_cast<int>(s_tasks.size()) - 1;
-                    }
-
-                    m_selectedTaskIndex = existing;
+                const int selected = m_timeline->getSelectedEventIndex();
+                if (selected >= 0 && selected < m_timeline->getEventCount()) {
+                    s_tasks.clear();
+                    s_tasks.push_back(makeTask(selected));
+                    m_selectedTaskIndex = 0;
                 }
             }
 
+            schedule(schedule_selector(FrameTaskPopup::updateTaskRunner), 0.016f);
             refreshList();
             if (m_selectedTaskIndex >= 0)
                 selectTask(m_selectedTaskIndex);
-            else if (!s_tasks.empty())
-                selectTask(0);
 
             return true;
         }
@@ -675,29 +309,20 @@ namespace {
             Popup::onClose(sender);
         }
 
-        void textChanged(CCTextInputNode* node) override {
-            if (node != m_lowInput && node != m_highInput)
-                return;
-        }
-
         void selectTask(int index) {
             if (index < 0 || index >= static_cast<int>(s_tasks.size()))
                 return;
 
             m_selectedTaskIndex = index;
             const auto& task = s_tasks[index];
-            const int low = task.finished ? task.windowLow : task.frame;
-            const int high = task.finished ? task.windowHigh : task.frame;
 
-            if (m_lowInput)
-                m_lowInput->setString(std::to_string(low).c_str());
-            if (m_highInput)
-                m_highInput->setString(std::to_string(high).c_str());
+            if (m_timeline)
+                m_timeline->selectEvent(task.eventIndex);
 
             if (m_selectedLabel) {
                 m_selectedLabel->setString(
                     fmt::format(
-                        "{}  @  {}  |  {}{}",
+                        "INPUT {}  @  {}  |  {}{}",
                         index + 1,
                         formatTime(task.frame, task.subframe),
                         task.player2 ? "P2" : "P1",
@@ -707,35 +332,34 @@ namespace {
             }
 
             if (m_status) {
-                m_status->setString(
-                    (task.finished
-                        ? fmt::format("Window  {} .. {}    |    {}",
-                            low,
-                            high,
-                            formatWindowKind(task.kind))
-                        : fmt::format("Ready to analyze    |    current timing {}", formatTime(task.frame, task.subframe))).c_str()
-                );
+                if (m_testing && index == m_taskIndex) {
+                    m_status->setString(
+                        fmt::format(
+                            "Scanning input {}: {} timing samples tested",
+                            index + 1,
+                            task.tested
+                        ).c_str()
+                    );
+                } else if (!task.finished) {
+                    m_status->setString(
+                        fmt::format(
+                            "Ready. Task scans ±6 frames; Analyze scans ±24. Current input: {}",
+                            formatTime(task.frame, task.subframe)
+                        ).c_str()
+                    );
+                } else {
+                    m_status->setString(
+                        fmt::format(
+                            "Finished: {} timings checked, {} distinct alignments",
+                            task.tested,
+                            task.alignments.size()
+                        ).c_str()
+                    );
+                }
             }
-        }
 
-        static bool parseFrame(CCTextInputNode* node, int& value) {
-            if (!node)
-                return false;
-
-            std::string text = node->getString();
-            if (text.empty() || text == "-")
-                return false;
-
-            try {
-                size_t consumed = 0;
-                int parsed = std::stoi(text, &consumed);
-                if (consumed != text.size())
-                    return false;
-                value = parsed;
-                return true;
-            } catch (...) {
-                return false;
-            }
+            updateDetails(task);
+            refreshList();
         }
 
         FrameTask makeTask(int index) const {
@@ -756,46 +380,16 @@ namespace {
             return task;
         }
 
-        void onTestSelected(CCObject*) {
+        void onTask(CCObject*) {
             if (m_testing || !m_timeline)
                 return;
 
-            clearMarkers();
-
-            FrameTask task;
-            if (m_selectedTaskIndex >= 0 && m_selectedTaskIndex < static_cast<int>(s_tasks.size())) {
-                task = s_tasks[m_selectedTaskIndex];
-            } else {
-                int index = m_timeline->getSelectedEventIndex();
-                task = makeTask(index);
-                if (task.eventIndex < 0) {
-                    m_status->setString("Select an input first");
-                    return;
-                }
-            }
-
-            s_tasks.clear();
-            s_tasks.push_back(task);
-            m_selectedTaskIndex = 0;
-            s_grid = 0;
-            startTesting(0, false);
-        }
-
-        void onApplyWindow(CCObject*) {
-            if (m_testing)
-                return;
-
             int index = m_selectedTaskIndex;
-
             if (index < 0 || index >= static_cast<int>(s_tasks.size())) {
-                if (!m_timeline) {
-                    m_status->setString("Select an input first");
-                    return;
-                }
-
-                FrameTask task = makeTask(m_timeline->getSelectedEventIndex());
+                index = m_timeline->getSelectedEventIndex();
+                FrameTask task = makeTask(index);
                 if (task.eventIndex < 0) {
-                    m_status->setString("Select an input first");
+                    m_status->setString("Select an input on the timeline first.");
                     return;
                 }
 
@@ -804,40 +398,8 @@ namespace {
                 m_selectedTaskIndex = index;
             }
 
-            int low = 0;
-            int high = 0;
-            if (!parseFrame(m_lowInput, low) || !parseFrame(m_highInput, high)) {
-                m_status->setString("Enter valid Low and High frames");
-                return;
-            }
-
-            low = std::max(0, low);
-            high = std::max(0, high);
-
-            if (low > high) {
-                m_status->setString("Low cannot be greater than High");
-                return;
-            }
-
-            auto& task = s_tasks[index];
-            task.windowLow = low;
-            task.windowHigh = high;
-            task.spanLow = static_cast<double>(low) - task.frame;
-            task.spanHigh = static_cast<double>(high) - task.frame;
-            task.windowWidth = static_cast<double>(high - low + 1);
-            task.windowCount = high - low + 1;
-            task.tested = 0;
-            task.passedCount = task.windowCount;
-            task.results.clear();
-            task.baselineFailed = false;
-            task.kind = FrameWindowKind::Normal;
-            task.finished = true;
-
-            refreshList();
-            selectTask(index);
-            m_status->setString(
-                fmt::format("Manual window set: {}..{} ({} frames)", low, high, task.windowCount).c_str()
-            );
+            clearMarkers();
+            startTesting(index, false, 6);
         }
 
         void onAnalyze(CCObject*) {
@@ -846,50 +408,50 @@ namespace {
 
             clearMarkers();
             generateAllTasks();
-            m_selectedTaskIndex = -1;
             if (s_tasks.empty()) {
-                m_status->setString("No inputs to analyze");
+                m_status->setString("No macro inputs to analyze.");
                 return;
             }
 
-            s_grid = 0;
-            startTesting(0, true);
-        }
+            const int selectedEvent = m_timeline->getSelectedEventIndex();
+            m_selectedTaskIndex = selectedEvent >= 0 && selectedEvent < static_cast<int>(s_tasks.size())
+                ? selectedEvent
+                : 0;
 
-        static constexpr int markerTag = 0xF7A5;
-
-        void clearMarkers() {
-            if (auto* pl = PlayLayer::get())
-                if (auto* markerLayer = pl->getChildByTag(markerTag))
-                    markerLayer->removeFromParentAndCleanup(true);
+            // Analyze must start at the first input, not the selected one.
+            // The selected task remains highlighted while the whole macro is scanned.
+            startTesting(0, true, 24);
         }
 
         void onStop(CCObject*) {
             cancelTesting();
         }
 
-        void onAddSelected(CCObject*) {
-            if (!m_timeline)
-                return;
+        void onClear(CCObject*) {
+            if (m_testing)
+                cancelTesting();
 
-            int index = m_timeline->getSelectedEventIndex();
-            FrameTask task = makeTask(index);
-            if (task.eventIndex < 0)
-                return;
+            for (auto& task : s_tasks) {
+                task.results.clear();
+                task.alignments.clear();
+                task.finished = false;
+                task.tested = 0;
+            }
 
-            s_tasks.push_back(task);
-            m_selectedTaskIndex = static_cast<int>(s_tasks.size()) - 1;
-            selectTask(m_selectedTaskIndex);
+            clearMarkers();
             refreshList();
-            if (m_status)
-                m_status->setString(
-                    fmt::format("Task added at {}    |    press Analyze to scan the window",
-                        formatTime(task.frame, task.subframe)).c_str()
-                );
+            if (m_selectedTaskIndex >= 0 &&
+                m_selectedTaskIndex < static_cast<int>(s_tasks.size())) {
+                m_status->setString("Results cleared. Tasks kept.");
+                updateDetails(s_tasks[m_selectedTaskIndex]);
+            } else {
+                m_status->setString("Results cleared. Select an input on the timeline.");
+                m_detailsLabel->setString("Orb: player Y - orb Y     |     Portal: player X - portal X");
+            }
         }
 
         void onSelectTask(CCObject* sender) {
-            auto item = static_cast<CCNode*>(sender);
+            auto* item = static_cast<CCNode*>(sender);
             selectTask(item->getTag());
         }
 
@@ -897,77 +459,80 @@ namespace {
             if (!m_timeline)
                 return;
 
-            auto const* events = m_timeline->getEvents();
+            const auto* events = m_timeline->getEvents();
             if (!events)
                 return;
 
             s_tasks.clear();
             s_tasks.reserve(events->size());
 
-            for (int i = 0; i < static_cast<int>(events->size()); ++i) {
-                const auto& event = (*events)[i];
-
-                FrameTask task;
-                task.eventIndex = i;
-                task.frame = event.frame;
-                task.subframe = event.subframe;
-                task.button = event.button;
-                task.player2 = event.player2;
-                task.down = event.down;
-                s_tasks.push_back(task);
-            }
+            for (int i = 0; i < static_cast<int>(events->size()); ++i)
+                s_tasks.push_back(makeTask(i));
         }
 
-        // "How many more frames do I need to pass this gap?" Double the substeps per frame
-        // and re-test, so a click that is impossible (or only 1 frame wide) on the current
-        // grid can be found between its samples, e.g. widening 1.0f to 1.6f.
-        void onSubdivide(CCObject*) {
-            if (m_testing || s_tasks.empty())
-                return;
+        void updateTaskRunner(float) {
+            if (!m_testing) {
+                if (m_timeline) {
+                    const int selected = m_timeline->getSelectedEventIndex();
+                    if (selected >= 0) {
+                        int existing = -1;
+                        for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
+                            if (s_tasks[i].eventIndex == selected) {
+                                existing = i;
+                                break;
+                            }
+                        }
 
-            if (!cbf::enabled()) {
-                m_status->setString("Enable CBF in the menu to test sub-frames");
-                return;
-            }
+                        if (existing < 0) {
+                            s_tasks.push_back(makeTask(selected));
+                            existing = static_cast<int>(s_tasks.size()) - 1;
+                            refreshList();
+                        }
 
-            int index = m_selectedTaskIndex;
-            if (index < 0 || index >= static_cast<int>(s_tasks.size()))
-                index = 0;
-
-            auto& task = s_tasks[index];
-            if (!task.finished || task.windowCount <= 0) {
-                m_status->setString("Analyze a task before subdividing it");
-                return;
-            }
-
-            constexpr int maxGrid = 80;
-            int const next = activeGrid() * 2;
-
-            if (next > maxGrid) {
-                m_status->setString(
-                    fmt::format("Already at max subdivision (1/{})", activeGrid()).c_str()
-                );
+                        if (existing >= 0 && existing != m_selectedTaskIndex)
+                            selectTask(existing);
+                    }
+                }
                 return;
             }
 
-            m_subdivideMode = true;
-            m_subdivideLow = task.windowLow;
-            m_subdivideHigh = task.windowHigh;
-            s_grid = next;
+            PlayLayer* pl = PlayLayer::get();
+            if (!pl)
+                return finishTesting();
 
-            m_status->setString(
-                fmt::format(
-                    "Subdividing task {}: 1/{} frame steps",
-                    index + 1,
-                    next
-                ).c_str()
+            const int frame = Global::getCurrentFrame();
+            PlayerObject* player =
+                s_tasks[m_taskIndex].player2 ? pl->m_player2 : pl->m_player1;
+
+            if (!player) {
+                recordResult(false, true);
+                return;
+            }
+
+            if ((pl->m_player1 && pl->m_player1->m_isDead) ||
+                (pl->m_player2 && pl->m_player2->m_isDead)) {
+                recordResult(false, true);
+                return;
+            }
+
+            if (pl->m_levelEndAnimationStarted) {
+                recordResult(true, false);
+                return;
+            }
+
+            if (frame >= m_endFrame)
+                recordResult(true, false);
+        }
+
+        static std::string formatTime(int frame, double subframe) {
+            if (std::abs(subframe) < 0.0001)
+                return std::to_string(frame);
+
+            return fmt::format(
+                "{}.{:02d}",
+                frame,
+                static_cast<int>(std::round(subframe * 100.0))
             );
-
-            startTesting(index, false);
-        }
-
-        void onStartAll(CCObject*) {
-            onAnalyze(nullptr);
         }
 
         void refreshList() {
@@ -978,29 +543,34 @@ namespace {
 
             if (m_countLabel) {
                 m_countLabel->setString(
-                    fmt::format("{} TASK{}", s_tasks.size(), s_tasks.size() == 1 ? "" : "S").c_str()
+                    fmt::format(
+                        "{} INPUT{}",
+                        s_tasks.size(),
+                        s_tasks.size() == 1 ? "" : "S"
+                    ).c_str()
                 );
             }
 
-            constexpr float rowHeight = 36.0f;
-            constexpr float rowLeft = 20.0f;
+            constexpr float rowHeight = 38.0f;
             constexpr float rowWidth = 480.0f;
-            float y = 180.0f;
+            float y = 196.0f;
 
-            const int visible = std::min<int>(static_cast<int>(s_tasks.size()), 3);
+            int start = 0;
+            if (s_tasks.size() > 3 && m_selectedTaskIndex >= 3)
+                start = m_selectedTaskIndex - 2;
 
-            for (int i = 0; i < visible; ++i) {
-                auto& task = s_tasks[i];
+            const int end = std::min<int>(
+                static_cast<int>(s_tasks.size()),
+                start + 3
+            );
 
-                int successful = 0;
-                for (const auto& result : task.results)
-                    successful += result.passed ? 1 : 0;
-
-                bool const selected = i == m_selectedTaskIndex;
+            for (int i = start; i < end; ++i) {
+                const auto& task = s_tasks[i];
+                const bool selected = i == m_selectedTaskIndex;
 
                 auto* row = CCScale9Sprite::create("square02b_001.png", {0, 0, 80, 80});
                 row->setContentSize({rowWidth, rowHeight - 3.0f});
-                row->setPosition({rowLeft + rowWidth / 2.0f, y});
+                row->setPosition({260, y});
                 row->setColor(selected ? ccColor3B{38, 55, 72} : ccColor3B{23, 26, 32});
                 row->setOpacity(selected ? 245 : 205);
                 m_list->addChild(row, 0);
@@ -1009,8 +579,7 @@ namespace {
                     fmt::format("{:02}", i + 1).c_str(),
                     "bigFont.fnt"
                 );
-                num->setScale(0.36f);
-                num->setAnchorPoint({0.5f, 0.5f});
+                num->setScale(0.34f);
                 num->setPosition({39, y});
                 num->setOpacity(170);
                 m_list->addChild(num, 2);
@@ -1019,43 +588,38 @@ namespace {
                     formatTime(task.frame, task.subframe).c_str(),
                     "bigFont.fnt"
                 );
-                time->setScale(0.42f);
+                time->setScale(0.40f);
                 time->setAnchorPoint({0, 0.5f});
                 time->setPosition({58, y + 5});
                 m_list->addChild(time, 2);
 
                 auto* meta = CCLabelBMFont::create(
-                    fmt::format("{}{} | {}", task.player2 ? "P2" : "P1",
-                                task.down ? " PRESS" : " RELEASE",
-                                task.button == 1 ? "JUMP" :
-                                task.button == 2 ? "LEFT" :
-                                task.button == 3 ? "RIGHT" : "?").c_str(),
+                    fmt::format(
+                        "{} {} | {}",
+                        task.player2 ? "P2" : "P1",
+                        task.down ? "PRESS" : "RELEASE",
+                        task.button == 1 ? "JUMP" :
+                        task.button == 2 ? "LEFT" :
+                        task.button == 3 ? "RIGHT" : "?"
+                    ).c_str(),
                     "chatFont.fnt"
                 );
-                meta->setScale(0.27f);
+                meta->setScale(0.26f);
                 meta->setAnchorPoint({0, 0.5f});
                 meta->setPosition({58, y - 8});
                 meta->setOpacity(145);
                 m_list->addChild(meta, 2);
 
-                std::string stateText = "WAITING";
-                if (task.finished) {
-                    if (task.baselineFailed)
-                        stateText = "FAILED";
-                    else if (task.kind == FrameWindowKind::Impossible)
-                        stateText = "IMPOSSIBLE";
-                    else
-                        stateText = fmt::format(
-                            "{}..{}",
-                            static_cast<int>(std::round(task.spanLow)),
-                            static_cast<int>(std::round(task.spanHigh))
-                        );
-                } else if (successful > 0) {
-                    stateText = fmt::format("{} PASS", successful);
-                }
+                std::string stateText = "READY";
+                if (m_testing && i == m_taskIndex)
+                    stateText = fmt::format("{} TESTED", task.tested);
+                else if (task.finished)
+                    stateText = formatTaskSummary(task);
+                else if (!task.results.empty())
+                    stateText = fmt::format("{} SAMPLES", task.tested);
 
                 auto* state = CCLabelBMFont::create(stateText.c_str(), "chatFont.fnt");
-                state->setScale(0.31f);
+                state->setScale(0.29f);
                 state->setAnchorPoint({1, 0.5f});
                 state->setPosition({493, y});
                 state->setOpacity(task.finished ? 225 : 150);
@@ -1074,76 +638,110 @@ namespace {
                 y -= rowHeight;
             }
 
-            if (s_tasks.size() > 3) {
-                auto* more = CCLabelBMFont::create(
-                    fmt::format("+ {} more tasks", s_tasks.size() - 3).c_str(),
-                    "chatFont.fnt"
-                );
-                more->setScale(0.28f);
-                more->setAnchorPoint({0.5f, 0.5f});
-                more->setPosition({260, 66});
-                more->setOpacity(120);
-                m_list->addChild(more, 2);
-            }
-
             if (s_tasks.empty()) {
                 auto* empty = CCLabelBMFont::create(
-                    "Select an input on the timeline to create a task",
+                    "Select an input, then press TASK or ANALYZE",
                     "chatFont.fnt"
                 );
                 empty->setScale(0.31f);
-                empty->setAnchorPoint({0.5f, 0.5f});
-                empty->setPosition({260, 140});
-                empty->setOpacity(120);
+                empty->setPosition({260, 150});
+                empty->setOpacity(150);
                 m_list->addChild(empty, 2);
             }
         }
 
-        static std::string formatTime(int frame, double subframe) {
-            if (std::abs(subframe) < 0.0001)
-                return std::to_string(frame);
+        static std::string formatTaskSummary(const FrameTask& task) {
+            int orbCount = 0;
+            int portalCount = 0;
+            for (const auto& sample : task.alignments) {
+                if (sample.kind == AlignmentKind::Orb)
+                    ++orbCount;
+                else
+                    ++portalCount;
+            }
 
+            if (orbCount == 0 && portalCount == 0)
+                return "NO ALIGNMENT";
+
+            if (orbCount > 0 && portalCount > 0)
+                return fmt::format("O:{}Y P:{}X", orbCount, portalCount);
+            if (orbCount > 0)
+                return fmt::format("ORB {}Y", orbCount);
+            return fmt::format("PORTAL {}X", portalCount);
+        }
+
+        static std::string formatSample(const AlignmentSample& sample) {
+            const char* type = sample.kind == AlignmentKind::Orb ? "ORB" : "PORTAL";
+            const char axis = sample.kind == AlignmentKind::Orb ? 'Y' : 'X';
             return fmt::format(
-                "{}.{:02d}",
-                frame,
-                static_cast<int>(std::round(subframe * 100.0))
+                "{} #{} {}{:+.1f} @{}",
+                type,
+                sample.objectId,
+                axis,
+                sample.axisDelta,
+                formatTime(sample.inputFrame, sample.inputSubframe)
             );
         }
 
-        static const char* formatWindowKind(FrameWindowKind kind) {
-            switch (kind) {
-                case FrameWindowKind::Shared: return "A+";
-                case FrameWindowKind::Optimal: return "A~";
-                case FrameWindowKind::Recovery: return "A^";
-                case FrameWindowKind::Alternating: return "A/B";
-                case FrameWindowKind::Disconnected: return "A-";
-                case FrameWindowKind::Impossible: return "X";
-                default: return "A";
+        void updateDetails(const FrameTask& task) {
+            if (!m_detailsLabel)
+                return;
+
+            if (task.alignments.empty()) {
+                m_detailsLabel->setString(
+                    task.finished
+                        ? "No orb or portal callback was observed in this scan."
+                        : "Orb: player Y - orb Y     |     Portal: player X - portal X"
+                );
+                return;
             }
+
+            std::string details;
+            int shown = 0;
+            for (const auto& sample : task.alignments) {
+                if (!details.empty())
+                    details += "  |  ";
+                details += formatSample(sample);
+                if (++shown >= 2)
+                    break;
+            }
+
+            if (task.alignments.size() > 2)
+                details += fmt::format("  |  +{} more", task.alignments.size() - 2);
+
+            m_detailsLabel->setString(details.c_str());
         }
 
-        int findTaskEvent(const Macro& macro, const FrameTask& task) const {
-            if (task.eventIndex >= 0 && task.eventIndex < static_cast<int>(macro.inputs.size())) {
-                const auto& event = macro.inputs[task.eventIndex];
+        static int findTaskEvent(const Macro& source, const FrameTask& task) {
+            const double target = static_cast<double>(task.frame) + task.subframe;
+
+            // Preserve exact identity when the macro contains duplicate actions
+            // at the same timestamp. Falling back to nearest matching timing keeps
+            // the lookup resilient if a timeline edit has reordered its inputs.
+            if (task.eventIndex >= 0 &&
+                task.eventIndex < static_cast<int>(source.inputs.size())) {
+                const auto& event = source.inputs[task.eventIndex];
                 if (event.button == task.button &&
                     event.player2 == task.player2 &&
-                    event.down == task.down)
+                    event.down == task.down &&
+                    std::abs(event.getPreciseFrame() - target) < 0.0001)
                     return task.eventIndex;
             }
 
             int best = -1;
             double bestDistance = std::numeric_limits<double>::max();
-            const double precise = static_cast<double>(task.frame) + task.subframe;
 
-            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
-                const auto& event = macro.inputs[i];
-
+            for (int i = 0; i < static_cast<int>(source.inputs.size()); ++i) {
+                const auto& event = source.inputs[i];
                 if (event.button != task.button ||
                     event.player2 != task.player2 ||
                     event.down != task.down)
                     continue;
 
-                double distance = std::abs(event.getPreciseFrame() - precise);
+                const double distance = std::abs(event.getPreciseFrame() - target);
+                if (distance < 0.0001)
+                    return i;
+
                 if (distance < bestDistance) {
                     bestDistance = distance;
                     best = i;
@@ -1151,206 +749,23 @@ namespace {
             }
 
             return best;
-        }
-
-        int findEventNear(const Macro& macro, const input& original, double precise) const {
-            int best = -1;
-            double bestDistance = std::numeric_limits<double>::max();
-
-            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
-                const auto& event = macro.inputs[i];
-
-                if (event.button != original.button ||
-                    event.player2 != original.player2 ||
-                    event.down != original.down)
-                    continue;
-
-                double distance = std::abs(event.getPreciseFrame() - precise);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    best = i;
-                }
-            }
-
-            return best;
-        }
-
-        int findAdjacentEvent(const Macro& macro, int eventIndex, bool previous) const {
-            if (eventIndex < 0 || eventIndex >= static_cast<int>(macro.inputs.size()))
-                return -1;
-
-            const auto& target = macro.inputs[eventIndex];
-            int best = -1;
-
-            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
-                if (i == eventIndex)
-                    continue;
-
-                const auto& event = macro.inputs[i];
-                if (event.player2 != target.player2 || event.button > 3)
-                    continue;
-
-                if (previous) {
-                    if (event.getPreciseFrame() >= target.getPreciseFrame())
-                        continue;
-                    if (best < 0 || event.getPreciseFrame() > macro.inputs[best].getPreciseFrame())
-                        best = i;
-                } else {
-                    if (event.getPreciseFrame() <= target.getPreciseFrame())
-                        continue;
-                    if (best < 0 || event.getPreciseFrame() < macro.inputs[best].getPreciseFrame())
-                        best = i;
-                }
-            }
-
-            return best;
-        }
-
-        int findNextSamePlayer(
-            const Macro& macro,
-            bool player2,
-            double after
-        ) const {
-            int best = -1;
-
-            for (int i = 0; i < static_cast<int>(macro.inputs.size()); ++i) {
-                const auto& event = macro.inputs[i];
-
-                if (event.player2 != player2 ||
-                    event.button > 3 ||
-                    event.getPreciseFrame() <= after)
-                    continue;
-
-                if (best < 0 ||
-                    event.getPreciseFrame() < macro.inputs[best].getPreciseFrame())
-                    best = i;
-            }
-
-            return best;
-        }
-
-        std::vector<int> validOffsets(const FrameTask& task) const {
-            std::vector<int> offsets;
-
-            for (const auto& result : task.results) {
-                if (result.passed && std::abs(result.subframe) < 0.0001)
-                    offsets.push_back(result.frame - task.frame);
-            }
-
-            std::sort(offsets.begin(), offsets.end());
-            offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
-            return offsets;
-        }
-
-        static std::vector<int> sampleOffsets(
-            const std::vector<int>& values,
-            size_t count
-        ) {
-            if (values.size() <= count)
-                return values;
-
-            std::vector<int> result;
-            result.reserve(count);
-
-            for (size_t i = 0; i < count; ++i) {
-                const size_t index =
-                    i * (values.size() - 1) / std::max<size_t>(1, count - 1);
-                result.push_back(values[index]);
-            }
-
-            return result;
-        }
-
-        // Substeps per frame used for testing. 0 follows the menu's Substep Divider;
-        // Subdivide doubles it to look for passes in gaps the coarser grid steps over.
-        static int activeGrid() {
-            return s_grid > 0 ? s_grid : cbf::substepDivider();
         }
 
         void buildCandidates(const FrameTask& task) {
             m_candidates.clear();
-            m_earlyDone = false;
-            m_lateDone = false;
+            m_candidates.push_back({task.frame, task.subframe});
 
-            if (m_subdivideMode) {
-                m_minTestFrame = m_subdivideLow;
-                m_maxTestFrame = m_subdivideHigh;
-
-                if (m_minTestFrame > m_maxTestFrame)
-                    return;
-
-                const int divider = std::max(1, activeGrid());
-                const size_t count =
-                    static_cast<size_t>(m_maxTestFrame - m_minTestFrame + 1) *
-                    static_cast<size_t>(divider);
-
-                m_candidates.reserve(count);
-
-                for (int frame = m_minTestFrame; frame <= m_maxTestFrame; ++frame) {
-                    for (int step = 0; step < divider; ++step) {
-                        m_candidates.push_back({
-                            frame,
-                            static_cast<double>(step) / divider,
-                            0,
-                            0,
-                            0.0,
-                            false,
-                            false
-                        });
-                    }
-                }
-
-                return;
+            for (int offset = 1; offset <= m_searchRadius; ++offset) {
+                if (task.frame - offset >= 0)
+                    m_candidates.push_back({task.frame - offset, task.subframe});
+                m_candidates.push_back({task.frame + offset, task.subframe});
             }
-
-            m_minTestFrame = std::max(0, task.frame - m_maxShift);
-            m_maxTestFrame = task.frame + m_maxShift;
-
-            const int eventIndex = task.eventIndex;
-            if (eventIndex >= 0 && eventIndex < static_cast<int>(m_backupMacro.inputs.size())) {
-                const double target =
-                    static_cast<double>(task.frame) + task.subframe;
-
-                if (eventIndex > 0 &&
-                    m_backupMacro.inputs[eventIndex - 1].player2 == task.player2) {
-                    const double previous =
-                        m_backupMacro.inputs[eventIndex - 1].getPreciseFrame();
-                    if (previous < target)
-                        m_minTestFrame = std::max(
-                            m_minTestFrame,
-                            static_cast<int>(std::floor(previous)) + 1
-                        );
-                }
-
-                if (eventIndex + 1 < static_cast<int>(m_backupMacro.inputs.size()) &&
-                    m_backupMacro.inputs[eventIndex + 1].player2 == task.player2) {
-                    const double next =
-                        m_backupMacro.inputs[eventIndex + 1].getPreciseFrame();
-                    if (next > target)
-                        m_maxTestFrame = std::min(
-                            m_maxTestFrame,
-                            static_cast<int>(std::ceil(next)) - 1
-                        );
-                }
-            }
-
-            // Always establish the recorded input as the known-good baseline.
-            m_candidates.push_back({
-                task.frame,
-                task.subframe,
-                0,
-                0,
-                0.0,
-                false,
-                false
-            });
-
-            m_earlyDone = m_minTestFrame >= task.frame;
-            m_lateDone = m_maxTestFrame <= task.frame;
         }
 
-        void startTesting(int taskIndex, bool all) {
-            if (m_testing || taskIndex < 0 || taskIndex >= static_cast<int>(s_tasks.size()))
+        void startTesting(int taskIndex, bool all, int radius) {
+            if (m_testing ||
+                taskIndex < 0 ||
+                taskIndex >= static_cast<int>(s_tasks.size()))
                 return;
 
             PlayLayer* pl = PlayLayer::get();
@@ -1364,39 +779,29 @@ namespace {
             m_backupRestart = Global::get().restart;
             m_backupFirstAttempt = Global::get().firstAttempt;
             m_backupRespawnFrame = Global::get().respawnFrame;
+
             m_taskIndex = taskIndex;
             m_testingAll = all;
             m_completedAll = false;
-            m_fastMode = false;
+            m_searchRadius = radius;
             m_testing = true;
-            cbf::setDividerOverride(activeGrid());
 
             if (m_testingAll) {
-                for (auto& task : s_tasks)
+                for (auto& task : s_tasks) {
+                    task.results.clear();
+                    task.alignments.clear();
                     task.finished = false;
+                    task.tested = 0;
+                }
             } else {
-                s_tasks[m_taskIndex].finished = false;
+                auto& task = s_tasks[m_taskIndex];
+                task.results.clear();
+                task.alignments.clear();
+                task.finished = false;
+                task.tested = 0;
             }
 
-            auto& task = s_tasks[m_taskIndex];
-            task.results.clear();
-            task.baselineFailed = false;
-            task.kind = FrameWindowKind::Normal;
-            task.windowCount = 0;
-            task.windowLow = 0;
-            task.windowHigh = 0;
-            task.cbfOnly = false;
-            task.recoveryMode = false;
-
-            m_probeStage = ProbeStage::Primary;
-            m_alternatingRuns.clear();
-            m_pairRuns.clear();
-            m_alternatingOffsets.clear();
-
-            buildCandidates(task);
-            m_candidateIndex = 0;
-            m_targetSeen = false;
-            m_attemptStartFrame = 0;
+            buildCandidates(s_tasks[m_taskIndex]);
 
             auto& g = Global::get();
             g.macro = m_backupMacro;
@@ -1407,6 +812,7 @@ namespace {
             g.firstAttempt = true;
             g.respawnFrame = -1;
 
+            m_candidateIndex = 0;
             beginCandidate();
         }
 
@@ -1414,49 +820,34 @@ namespace {
             if (!m_testing)
                 return;
 
-            if (m_taskIndex < 0 || m_taskIndex >= static_cast<int>(s_tasks.size())) {
-                finishTesting();
-                return;
-            }
+            if (m_taskIndex < 0 || m_taskIndex >= static_cast<int>(s_tasks.size()))
+                return finishTesting();
 
             if (m_candidateIndex >= static_cast<int>(m_candidates.size())) {
-                finalizeTaskWindow(s_tasks[m_taskIndex]);
-                s_tasks[m_taskIndex].finished = true;
+                auto& task = s_tasks[m_taskIndex];
+                task.finished = true;
+
+                for (const auto& sample : task.alignments)
+                    addMarker(sample);
 
                 if (m_testingAll && m_taskIndex + 1 < static_cast<int>(s_tasks.size())) {
                     ++m_taskIndex;
-
-                    auto& nextTask = s_tasks[m_taskIndex];
-                    nextTask.results.clear();
-                    nextTask.baselineFailed = false;
-                    nextTask.kind = FrameWindowKind::Normal;
-                    nextTask.windowCount = 0;
-                    nextTask.windowLow = 0;
-                    nextTask.windowHigh = 0;
-                    nextTask.cbfOnly = false;
-                    nextTask.recoveryMode = false;
-
-                    m_probeStage = ProbeStage::Primary;
-                    m_completedAll = false;
-                    buildCandidates(nextTask);
+                    buildCandidates(s_tasks[m_taskIndex]);
                     m_candidateIndex = 0;
                     beginCandidate();
                     return;
                 }
 
                 m_completedAll = m_testingAll;
-                finishTesting();
-                return;
+                return finishTesting();
             }
 
             PlayLayer* pl = PlayLayer::get();
-            if (!pl) {
-                finishTesting();
-                return;
-            }
+            if (!pl)
+                return finishTesting();
 
             auto& task = s_tasks[m_taskIndex];
-            const auto candidate = m_candidates[m_candidateIndex];
+            const Candidate candidate = m_candidates[m_candidateIndex];
 
             Macro candidateMacro = m_backupMacro;
             const int eventIndex = findTaskEvent(candidateMacro, task);
@@ -1469,29 +860,28 @@ namespace {
             candidateMacro.inputs[eventIndex].setPreciseFrame(
                 static_cast<double>(candidate.frame) + candidate.subframe
             );
+            std::stable_sort(candidateMacro.inputs.begin(), candidateMacro.inputs.end());
 
-            const double candidatePrecise =
+            const double candidateTime =
                 static_cast<double>(candidate.frame) + candidate.subframe;
+            double endTime = candidateTime + 48.0;
 
-            m_passFrame = -1;
-            m_passSubframe = 0.0;
-
-            for (const auto& input : candidateMacro.inputs) {
-                if (input.player2 == task.player2 &&
-                    input.button <= 3 &&
-                    input.getPreciseFrame() > candidatePrecise + 0.0001) {
-                    m_passFrame = input.frame;
-                    m_passSubframe = input.subframe;
+            for (const auto& event : candidateMacro.inputs) {
+                if (event.player2 == task.player2 &&
+                    event.button <= 3 &&
+                    event.getPreciseFrame() > candidateTime + 0.0001) {
+                    endTime = std::min(endTime, event.getPreciseFrame());
                     break;
                 }
             }
 
-            // Keep the trial bounded even for the final input in a macro.
-            if (m_passFrame < 0)
-                m_passFrame = candidate.frame + 12;
+            m_endFrame = std::max(
+                candidate.frame + 1,
+                static_cast<int>(std::ceil(endTime))
+            );
 
             auto& g = Global::get();
-            g.macro = candidateMacro;
+            g.macro = std::move(candidateMacro);
             g.state = state::playing;
             g.currentAction = 0;
             g.currentFrameFix = 0;
@@ -1499,484 +889,87 @@ namespace {
             g.firstAttempt = true;
             g.respawnFrame = -1;
 
+            g_alignmentProbe.reset();
+            g_alignmentProbe.active = true;
+            g_alignmentProbe.player2 = task.player2;
+            g_alignmentProbe.firstFrame = std::max(0, candidate.frame - 1);
+            g_alignmentProbe.lastFrame = m_endFrame + 1;
+            g_alignmentProbe.inputFrame = candidate.frame;
+            g_alignmentProbe.inputSubframe = candidate.subframe;
+
             m_targetFrame = candidate.frame;
             m_targetSubframe = candidate.subframe;
-            m_targetSeen = false;
-            m_targetPosition = CCPoint{0.0f, 0.0f};
-            m_attemptStartFrame = 0;
+            m_attemptPosition = {0, 0};
 
+            // Every timing trial must start with a clean CBF queue, otherwise
+            // sub-frame inputs armed by the previous trial can leak into this one.
+            cbf::Engine::get()->reset();
             pl->resetLevelFromStart();
 
-            m_status->setString(
-                fmt::format(
-                    "{} {}/{} | frame {}",
-                    m_testingAll ? "Analyze" : "Test",
-                    m_taskIndex + 1,
-                    s_tasks.size(),
-                    m_targetFrame
-                ).c_str()
-            );
+            if (m_status) {
+                m_status->setString(
+                    fmt::format(
+                        "{} input {}/{} | timing {}",
+                        m_testingAll ? "Analyze" : "Task",
+                        m_taskIndex + 1,
+                        s_tasks.size(),
+                        formatTime(m_targetFrame, m_targetSubframe)
+                    ).c_str()
+                );
+            }
+            refreshList();
         }
 
-        void updateTaskRunner(float) {
-            if (!m_testing) {
-                if (m_timeline) {
-                    int const selected = m_timeline->getSelectedEventIndex();
-                    if (selected >= 0) {
-                        int existing = -1;
-                        for (int i = 0; i < static_cast<int>(s_tasks.size()); ++i) {
-                            if (s_tasks[i].eventIndex == selected) {
-                                existing = i;
-                                break;
-                            }
-                        }
-
-                        if (existing < 0) {
-                            s_tasks.push_back(makeTask(selected));
-                            existing = static_cast<int>(s_tasks.size()) - 1;
-                            refreshList();
-                        }
-
-                        if (existing >= 0 && m_selectedTaskIndex != existing)
-                            selectTask(existing);
-                    }
-                }
-                return;
-            }
-
-            PlayLayer* pl = PlayLayer::get();
-            if (!pl)
-                return finishTesting();
-
-            int frame = Global::getCurrentFrame();
-
-            if (m_attemptStartFrame == 0 && frame > 0)
-                m_attemptStartFrame = frame;
-
-            if (!m_targetSeen && frame >= m_targetFrame) {
-                PlayerObject* player =
-                    s_tasks[m_taskIndex].player2 ? pl->m_player2 : pl->m_player1;
-
-                if (player) {
-                    m_targetPosition = player->getPosition();
-                    m_targetSeen = true;
-
-                    if (player->m_isShip || player->m_isSwing) {
-                        m_recoveryProbe = true;
-                        s_tasks[m_taskIndex].recoveryMode = true;
-
-                        if (m_passFrame >= 0)
-                            m_passFrame += 8;
-                    }
-                }
-            }
-
-            if (pl->m_player1 && pl->m_player1->m_isDead) {
-                recordResult(false);
-                return;
-            }
-
-            if (pl->m_levelEndAnimationStarted) {
-                recordResult(true);
-                return;
-            }
-
-            const int passFrame = m_passFrame >= 0
-                ? m_passFrame
-                : m_targetFrame + 12;
-
-            if (m_targetSeen && frame >= passFrame)
-                recordResult(true);
-        }
-
-        void recordResult(bool passed) {
+        void recordResult(bool survived, bool died) {
             if (!m_testing)
                 return;
 
+            g_alignmentProbe.active = false;
             auto& task = s_tasks[m_taskIndex];
 
             FrameTaskResult result;
             result.frame = m_targetFrame;
             result.subframe = m_targetSubframe;
-            result.passed = passed;
-            result.position = m_targetPosition;
+            result.survived = survived;
+            result.died = died;
+            result.alignments = g_alignmentProbe.hits;
 
-            const int offset = result.frame - task.frame;
+            if (PlayLayer* pl = PlayLayer::get()) {
+                PlayerObject* player = task.player2 ? pl->m_player2 : pl->m_player1;
+                if (player)
+                    result.position = player->getPosition();
+            }
 
-            if (m_probeStage == ProbeStage::Primary) {
-                task.results.push_back(result);
+            task.results.push_back(result);
+            ++task.tested;
 
-                    // The original macro timing must survive. If it does not, probing this
-                // input would only measure a broken baseline. For whole-level analysis,
-                // skip this input and continue instead of aborting the entire run.
-                if (offset == 0 && !passed) {
-                    task.baselineFailed = true;
-                    m_candidates.clear();
-                    ++m_candidateIndex;
-                    beginCandidate();
-                    return;
-                }
-
-                if (offset == 0) {
-                    if (!m_earlyDone)
-                        m_candidates.push_back({
-                            task.frame - 1,
-                            task.subframe,
-                            0,
-                            0,
-                            0.0,
-                            false,
-                            false
-                        });
-
-                    if (!m_lateDone)
-                        m_candidates.push_back({
-                            task.frame + 1,
-                            task.subframe,
-                            0,
-                            0,
-                            0.0,
-                            false,
-                            false
-                        });
-                } else if (offset < 0) {
-                    if (!passed) {
-                        m_earlyDone = true;
-                    } else {
-                        int nextFrame = result.frame - 1;
-                        if (nextFrame < m_minTestFrame)
-                            m_earlyDone = true;
-                        else
-                            m_candidates.push_back({
-                                nextFrame,
-                                task.subframe,
-                                0,
-                                0,
-                                0.0,
-                                false,
-                                false
-                            });
+            for (const auto& sample : result.alignments) {
+                const auto duplicate = std::find_if(
+                    task.alignments.begin(),
+                    task.alignments.end(),
+                    [&](const AlignmentSample& existing) {
+                        return existing.kind == sample.kind &&
+                            existing.objectId == sample.objectId &&
+                            std::abs(existing.objectPosition.x - sample.objectPosition.x) < 0.1f &&
+                            std::abs(existing.objectPosition.y - sample.objectPosition.y) < 0.1f &&
+                            std::abs(existing.axisDelta - sample.axisDelta) < 0.5f;
                     }
-                } else {
-                    if (!passed) {
-                        m_lateDone = true;
-                    } else {
-                        int nextFrame = result.frame + 1;
-                        if (nextFrame > m_maxTestFrame)
-                            m_lateDone = true;
-                        else
-                            m_candidates.push_back({
-                                nextFrame,
-                                task.subframe,
-                                0,
-                                0,
-                                0.0,
-                                false,
-                                false
-                            });
-                    }
-                }
+                );
+
+                if (duplicate == task.alignments.end())
+                    task.alignments.push_back(sample);
             }
 
             ++m_candidateIndex;
             beginCandidate();
         }
 
-        bool hasAlternatingBehavior() const {
-            if (m_alternatingRuns.empty() || m_alternatingOffsets.empty())
-                return false;
-
-            int oddChanges = 0;
-            int evenChanges = 0;
-
-            for (int targetShift : m_alternatingOffsets) {
-                bool minus = false;
-                bool zero = false;
-                bool plus = false;
-
-                for (const auto& run : m_alternatingRuns) {
-                    if (run.targetShift != targetShift)
-                        continue;
-
-                    if (run.contextShift == -1)
-                        minus = run.passed;
-                    else if (run.contextShift == 0)
-                        zero = run.passed;
-                    else if (run.contextShift == 1)
-                        plus = run.passed;
-                }
-
-                if (minus == zero && plus == zero)
-                    continue;
-
-                if (std::abs(targetShift) % 2)
-                    ++oddChanges;
-                else
-                    ++evenChanges;
-            }
-
-            return oddChanges >= 2 && oddChanges > evenChanges + 1;
-        }
-
-        bool hasDependentRelationship(bool& shared) const {
-            shared = false;
-
-            if (m_pairRuns.empty())
-                return false;
-
-            struct Row {
-                int a = 0;
-                int minB = 1000000;
-                int maxB = -1000000;
-            };
-
-            std::vector<Row> rows;
-
-            for (const auto& run : m_pairRuns) {
-                if (!run.passed)
-                    continue;
-
-                auto it = std::find_if(
-                    rows.begin(),
-                    rows.end(),
-                    [&](const Row& row) {
-                        return row.a == run.contextShift;
-                    }
-                );
-
-                if (it == rows.end()) {
-                    rows.push_back({
-                        run.contextShift,
-                        run.pairedShift,
-                        run.pairedShift
-                    });
-                } else {
-                    it->minB = std::min(it->minB, run.pairedShift);
-                    it->maxB = std::max(it->maxB, run.pairedShift);
-                }
-            }
-
-            if (rows.size() < 3)
-                return false;
-
-            std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
-                return a.a < b.a;
-            });
-
-            int negativeSteps = 0;
-            int minWidth = 1000000;
-            int maxWidth = 0;
-
-            for (size_t i = 0; i < rows.size(); ++i) {
-                const int width = rows[i].maxB - rows[i].minB + 1;
-                minWidth = std::min(minWidth, width);
-                maxWidth = std::max(maxWidth, width);
-
-                if (i > 0 && rows[i].minB < rows[i - 1].minB)
-                    ++negativeSteps;
-            }
-
-            if (negativeSteps < 2)
-                return false;
-
-            shared = maxWidth - minWidth <= 2;
-            return true;
-        }
-
-        void finalizeTaskWindow(FrameTask& task) {
-            std::vector<const FrameTaskResult*> passedResults;
-            passedResults.reserve(task.results.size());
-
-            for (const auto& result : task.results) {
-                if (result.passed)
-                    passedResults.push_back(&result);
-            }
-
-            std::sort(
-                passedResults.begin(),
-                passedResults.end(),
-                [](const auto* a, const auto* b) {
-                    if (a->frame != b->frame)
-                        return a->frame < b->frame;
-                    return a->subframe < b->subframe;
-                }
-            );
-
-            task.tested = static_cast<int>(task.results.size());
-            task.passedCount = static_cast<int>(passedResults.size());
-            task.grid = activeGrid();
-
-            if (passedResults.empty()) {
-                task.windowLow = task.windowHigh = task.frame;
-                task.spanLow = task.spanHigh = 0.0;
-                task.windowWidth = 0.0;
-                task.windowCount = 0;
-                task.kind = FrameWindowKind::Impossible;
-            } else if (m_subdivideMode) {
-                const double preciseLow =
-                    static_cast<double>(passedResults.front()->frame) +
-                    passedResults.front()->subframe;
-                const double preciseHigh =
-                    static_cast<double>(passedResults.back()->frame) +
-                    passedResults.back()->subframe;
-
-                task.windowLow = passedResults.front()->frame;
-                task.windowHigh = passedResults.back()->frame;
-                task.spanLow =
-                    preciseLow -
-                    (static_cast<double>(task.frame) + task.subframe);
-                task.spanHigh =
-                    preciseHigh -
-                    (static_cast<double>(task.frame) + task.subframe);
-                task.windowWidth = preciseHigh - preciseLow;
-                task.windowCount = static_cast<int>(passedResults.size());
-
-                bool hole = false;
-                const double sampleStep = 1.0 / std::max(1, task.grid);
-                double previous = preciseLow;
-
-                for (size_t i = 1; i < passedResults.size(); ++i) {
-                    const double current =
-                        static_cast<double>(passedResults[i]->frame) +
-                        passedResults[i]->subframe;
-
-                    if (current - previous > sampleStep + 0.0001) {
-                        hole = true;
-                        break;
-                    }
-
-                    previous = current;
-                }
-
-                task.kind = hole
-                    ? FrameWindowKind::Disconnected
-                    : FrameWindowKind::Normal;
-            } else {
-                std::vector<int> passedFrames;
-                passedFrames.reserve(passedResults.size());
-
-                for (const auto* result : passedResults) {
-                    if (std::abs(result->subframe - task.subframe) < 0.0001)
-                        passedFrames.push_back(result->frame);
-                }
-
-                std::sort(passedFrames.begin(), passedFrames.end());
-                passedFrames.erase(
-                    std::unique(passedFrames.begin(), passedFrames.end()),
-                    passedFrames.end()
-                );
-
-                task.passedCount = static_cast<int>(passedFrames.size());
-
-                if (!passedFrames.empty()) {
-                    task.windowLow = passedFrames.front();
-                    task.windowHigh = passedFrames.back();
-                    task.spanLow =
-                        static_cast<double>(task.windowLow) -
-                        static_cast<double>(task.frame);
-                    task.spanHigh =
-                        static_cast<double>(task.windowHigh) -
-                        static_cast<double>(task.frame);
-                    task.windowWidth =
-                        static_cast<double>(task.windowHigh - task.windowLow + 1);
-                    task.windowCount = static_cast<int>(passedFrames.size());
-
-                    bool hole = false;
-                    for (size_t i = 1; i < passedFrames.size(); ++i) {
-                        if (passedFrames[i] != passedFrames[i - 1] + 1) {
-                            hole = true;
-                            break;
-                        }
-                    }
-
-                    task.kind = hole
-                        ? FrameWindowKind::Disconnected
-                        : FrameWindowKind::Normal;
-                } else {
-                    task.windowLow = task.windowHigh = task.frame;
-                    task.spanLow = task.spanHigh = 0.0;
-                    task.windowWidth = 0.0;
-                    task.windowCount = 0;
-                    task.kind = FrameWindowKind::Impossible;
-                }
-            }
-
-            for (const auto& result : task.results) {
-                if (result.passed)
-                    addMarker(result);
-            }
-        }
-
-        void buildAlternatingProbes(const FrameTask& task) {
-            m_candidates.clear();
-            m_alternatingRuns.clear();
-
-            const int eventIndex = findTaskEvent(m_backupMacro, task);
-            const int previous =
-                findAdjacentEvent(m_backupMacro, eventIndex, true);
-
-            if (previous < 0)
-                return;
-
-            m_alternatingOffsets = sampleOffsets(validOffsets(task), 7);
-            if (m_alternatingOffsets.empty())
-                return;
-
-            m_probeStage = ProbeStage::Alternating;
-
-            for (int contextShift : {-1, 0, 1}) {
-                for (int offset : m_alternatingOffsets) {
-                    m_candidates.push_back({
-                        task.frame + offset,
-                        0.0,
-                        contextShift,
-                        0,
-                        0.0,
-                        false,
-                        true
-                    });
-                }
-            }
-        }
-
-        void buildPairProbes(const FrameTask& task) {
-            m_candidates.clear();
-            m_pairRuns.clear();
-
-            const int eventIndex = findTaskEvent(m_backupMacro, task);
-            const int next = findAdjacentEvent(m_backupMacro, eventIndex, false);
-
-            if (next < 0)
-                return;
-
-            const auto offsets = sampleOffsets(validOffsets(task), 5);
-            if (offsets.empty())
-                return;
-
-            m_probeStage = ProbeStage::Pair;
-            m_pairBaseFrame = m_backupMacro.inputs[next].frame;
-
-            for (int aOffset : offsets) {
-                for (int bOffset = -5; bOffset <= 5; ++bOffset) {
-                    m_candidates.push_back({
-                        task.frame + aOffset,
-                        0.0,
-                        aOffset,
-                        m_pairBaseFrame + bOffset,
-                        m_backupMacro.inputs[next].subframe,
-                        true,
-                        false
-                    });
-                }
-            }
-        }
-
-        void addMarker(const FrameTaskResult& result) {
+        void addMarker(const AlignmentSample& sample) {
             PlayLayer* pl = PlayLayer::get();
             if (!pl)
                 return;
 
-            auto* markerLayer = pl->getChildByTag(FrameTaskPopup::markerTag);
+            auto* markerLayer = pl->getChildByTag(markerTag);
             if (!markerLayer) {
                 markerLayer = CCLayer::create();
                 markerLayer->setTag(markerTag);
@@ -1984,25 +977,41 @@ namespace {
                 pl->addChild(markerLayer);
             }
 
+            const bool orb = sample.kind == AlignmentKind::Orb;
+            const auto fill = orb
+                ? ccc4f(1.0f, 0.72f, 0.15f, 0.22f)
+                : ccc4f(0.15f, 0.78f, 1.0f, 0.22f);
+            const auto line = orb
+                ? ccc4f(1.0f, 0.72f, 0.15f, 0.95f)
+                : ccc4f(0.15f, 0.78f, 1.0f, 0.95f);
+
             auto* draw = CCDrawNode::create();
-            draw->drawCircle(
-                result.position,
-                10.0f,
-                ccc4f(0.1f, 1.0f, 0.2f, 0.85f),
-                1.5f,
-                ccc4f(0.1f, 1.0f, 0.2f, 0.95f),
-                24
-            );
+            draw->drawCircle(sample.playerPosition, 8.0f, fill, 1.5f, line, 24);
             markerLayer->addChild(draw);
 
-            auto label = CCLabelBMFont::create(
-                formatTime(result.frame, result.subframe).c_str(),
+            auto* label = CCLabelBMFont::create(
+                fmt::format(
+                    "{} {}{:+.1f}",
+                    orb ? "ORB" : "PORTAL",
+                    orb ? "Y" : "X",
+                    sample.axisDelta
+                ).c_str(),
                 "chatFont.fnt"
             );
-            label->setScale(0.34f);
+            label->setScale(0.31f);
             label->setAnchorPoint({0.5f, 0.0f});
-            label->setPosition({result.position.x, result.position.y + 11.0f});
+            label->setPosition({
+                sample.playerPosition.x,
+                sample.playerPosition.y + 9.0f
+            });
             markerLayer->addChild(label);
+        }
+
+        void clearMarkers() {
+            if (auto* pl = PlayLayer::get()) {
+                if (auto* markerLayer = pl->getChildByTag(markerTag))
+                    markerLayer->removeFromParentAndCleanup(true);
+            }
         }
 
         void finishTesting() {
@@ -2010,9 +1019,7 @@ namespace {
                 return;
 
             auto& g = Global::get();
-            int const grid = activeGrid();
-            bool const completedAll = m_completedAll;
-
+            g_alignmentProbe.reset();
             g.macro = m_backupMacro;
             g.state = m_backupState;
             g.currentAction = m_backupCurrentAction;
@@ -2020,12 +1027,11 @@ namespace {
             g.restart = m_backupRestart;
             g.firstAttempt = m_backupFirstAttempt;
             g.respawnFrame = m_backupRespawnFrame;
-
-            m_testing = false;
-            m_fastMode = false;
+            cbf::Engine::get()->reset();
             cbf::setDividerOverride(0);
 
-            if (completedAll) {
+            m_testing = false;
+            if (m_completedAll) {
                 for (auto& task : s_tasks)
                     task.finished = true;
             } else if (m_taskIndex >= 0 && m_taskIndex < static_cast<int>(s_tasks.size())) {
@@ -2033,34 +1039,55 @@ namespace {
                 m_selectedTaskIndex = m_taskIndex;
             }
 
-            m_subdivideMode = false;
-            m_subdivideLow = 0;
-            m_subdivideHigh = 0;
-
             Macro::updateTPS();
             refreshList();
 
-            int total = 0;
-            for (const auto& task : s_tasks)
-                total += task.passedCount;
+            if (m_completedAll) {
+                int orbAlignments = 0;
+                int portalAlignments = 0;
+                int tested = 0;
+                for (const auto& task : s_tasks) {
+                    tested += task.tested;
+                    for (const auto& sample : task.alignments) {
+                        if (sample.kind == AlignmentKind::Orb)
+                            ++orbAlignments;
+                        else
+                            ++portalAlignments;
+                    }
+                }
 
-            std::string note = fmt::format(
-                "Finished: {} inputs tested, {} valid frames",
-                s_tasks.size(),
-                total
-            );
-
-            if (grid != cbf::substepDivider())
-                note += fmt::format(" | grid 1/{}", grid);
-
-            m_status->setString(note.c_str());
+                m_status->setString(
+                    fmt::format(
+                        "Analyze complete: {} timings, {} orb Y and {} portal X alignments.",
+                        tested,
+                        orbAlignments,
+                        portalAlignments
+                    ).c_str()
+                );
+                if (m_selectedTaskIndex >= 0 && m_selectedTaskIndex < static_cast<int>(s_tasks.size()))
+                    updateDetails(s_tasks[m_selectedTaskIndex]);
+            } else if (m_taskIndex >= 0 && m_taskIndex < static_cast<int>(s_tasks.size())) {
+                const auto& task = s_tasks[m_taskIndex];
+                m_status->setString(
+                    fmt::format(
+                        "Task complete: {} timings checked, {} alignments found.",
+                        task.tested,
+                        task.alignments.size()
+                    ).c_str()
+                );
+                updateDetails(task);
+            }
         }
 
         void cancelTesting() {
-            if (!m_testing)
+            if (!m_testing) {
+                g_alignmentProbe.reset();
+                cbf::setDividerOverride(0);
                 return;
+            }
 
             auto& g = Global::get();
+            g_alignmentProbe.reset();
             g.macro = m_backupMacro;
             g.state = m_backupState;
             g.currentAction = m_backupCurrentAction;
@@ -2068,16 +1095,21 @@ namespace {
             g.restart = m_backupRestart;
             g.firstAttempt = m_backupFirstAttempt;
             g.respawnFrame = m_backupRespawnFrame;
+            cbf::Engine::get()->reset();
+            cbf::setDividerOverride(0);
 
             m_testing = false;
-            m_fastMode = false;
-            cbf::setDividerOverride(0);
-            m_status->setString("Testing stopped");
+            m_status->setString("Scan stopped. Original macro state restored.");
             refreshList();
             Macro::updateTPS();
         }
 
     private:
+        struct Candidate {
+            int frame = 0;
+            double subframe = 0.0;
+        };
+
         MacroTimeline* m_timeline = nullptr;
         CCMenu* m_actionMenu = nullptr;
         CCMenu* m_list = nullptr;
@@ -2085,31 +1117,19 @@ namespace {
         CCLabelBMFont* m_headerLabel = nullptr;
         CCLabelBMFont* m_countLabel = nullptr;
         CCLabelBMFont* m_selectedLabel = nullptr;
+        CCLabelBMFont* m_detailsLabel = nullptr;
 
         bool m_testing = false;
         bool m_testingAll = false;
         bool m_completedAll = false;
-        bool m_fastMode = false;
         int m_selectedTaskIndex = -1;
-        CCTextInputNode* m_lowInput = nullptr;
-        CCTextInputNode* m_highInput = nullptr;
-        bool m_earlyDone = false;
-        bool m_lateDone = false;
-        int m_minTestFrame = 0;
-        int m_maxTestFrame = 0;
-        static constexpr int m_maxShift = 48;
-        bool m_subdivideMode = false;
-        int m_subdivideLow = 0;
-        int m_subdivideHigh = 0;
         int m_taskIndex = -1;
         int m_candidateIndex = 0;
+        int m_searchRadius = 6;
         int m_targetFrame = 0;
         double m_targetSubframe = 0.0;
-        int m_passFrame = -1;
-        double m_passSubframe = 0.0;
-        int m_attemptStartFrame = 0;
-        bool m_targetSeen = false;
-        CCPoint m_targetPosition = {0, 0};
+        int m_endFrame = 0;
+        cocos2d::CCPoint m_attemptPosition = {0, 0};
 
         Macro m_backupMacro;
         state m_backupState = state::none;
@@ -2119,40 +1139,8 @@ namespace {
         bool m_backupFirstAttempt = false;
         int m_backupRespawnFrame = -1;
 
-        enum class ProbeStage {
-            Primary,
-            Alternating,
-            Pair
-        };
-
-        struct AlternatingRun {
-            int contextShift = 0;
-            int targetShift = 0;
-            bool passed = false;
-        };
-
-        struct PairRun {
-            int contextShift = 0;
-            int pairedShift = 0;
-            bool passed = false;
-        };
-
-        ProbeStage m_probeStage = ProbeStage::Primary;
-        std::vector<FrameTaskProbe> m_candidates;
-        std::vector<AlternatingRun> m_alternatingRuns;
-        std::vector<PairRun> m_pairRuns;
-        std::vector<int> m_alternatingOffsets;
-
-        int m_probeContextShift = 0;
-        int m_probePairedFrame = 0;
-        double m_probePairedSubframe = 0.0;
-        int m_pairBaseFrame = 0;
-        bool m_recoveryProbe = false;
-
-        std::unique_ptr<FastFrameWindowSimulator> m_simulator;
-
+        std::vector<Candidate> m_candidates;
         static inline std::vector<FrameTask> s_tasks;
-        static inline int s_grid = 0;
     };
 }
 
